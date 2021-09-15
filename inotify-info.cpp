@@ -34,6 +34,7 @@
 #include <sys/stat.h>
 #include <syscall.h>
 #include <unistd.h>
+#include <sys/sysmacros.h>
 
 #include <string>
 #include <vector>
@@ -240,9 +241,14 @@ static uint32_t inotify_parse_fdinfo_file( procinfo_t &procinfo, const char *fds
 
                 if ( inode_val )
                 {
-                    dev_t sdev = ( sdev_val >> 12 ) | ( sdev_val & 0xff );
+                    // https://unix.stackexchange.com/questions/645937/listing-the-files-that-are-being-watched-by-inotify-instances
+                    //   Assuming that the sdev field is encoded according to Linux's so-called "huge
+                    //   encoding", which uses 20 bits (instead of 8) for minor numbers, in bitwise
+                    //   parlance the major number is sdev >> 20 while the minor is sdev & 0xfffff.
+                    dev_t major = sdev_val >> 20;
+                    dev_t minor = sdev_val & 0xfffff;
 
-                    procinfo.watched_inodes.push_back( { inode_val, sdev } );
+                    procinfo.watched_inodes.push_back( { inode_val, makedev( major, minor ) } );
                 }
             }
         }
