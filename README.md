@@ -151,3 +151,7 @@ Searching '/' for listed inodes... (8 threads)
  92275589 [10304h] /etc/xdg/menus/
  94111468 [10304h] /home/mikesart/.cache/xfce4/xfce4-appfinder/
 ```
+
+## Credits
+
+lfqueue is [BSD-2-Clause License](https://github.com/Taymindis/lfqueue)
