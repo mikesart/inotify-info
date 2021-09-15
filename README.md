@@ -7,6 +7,9 @@ This app should hopefully help track down how many inotify watches, instances, a
 ** https://code.visualstudio.com/docs/setup/linux#_visual-studio-code-is-unable-to-watch-for-file-changes-in-this-large-workspace-error-enospc  
 *** https://unix.stackexchange.com/questions/15509/whos-consuming-my-inotify-resources  
 
+## Screenshot
+![Alt text](images/inotify-info.png?raw=true "inotify-info")
+
 ## Build
 ```
 $ make
