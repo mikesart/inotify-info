@@ -36,6 +36,7 @@
 #include <unistd.h>
 #include <sys/sysmacros.h>
 
+#include <atomic>
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -85,7 +86,7 @@ public:
     // Create unique string from inode number + device ID
     static std::string get_inode_sdev_str( const std::pair< ino64_t, dev_t > &inode )
     {
-        return string_format( "%lu [%lxh]", inode.first, inode.second );
+        return string_format( "%lu [%u:%u]", inode.first, major( inode.second ), minor( inode.second ) );
     }
 
 private:
@@ -106,6 +107,9 @@ private:
 
     uint32_t total_watches = 0;
     uint32_t total_instances = 0;
+
+    double search_time = 0.0;
+    std::atomic_uint_fast32_t total_dirs {0};
 
     // Command line app args
     std::vector< std::string > cmdline_applist;
@@ -143,6 +147,14 @@ struct linux_dirent64
 int sys_getdents64( int fd, char *dirp, unsigned int count )
 {
     return syscall( SYS_getdents64, fd, dirp, count );
+}
+
+static double gettime()
+{
+    struct timespec ts;
+
+    clock_gettime( CLOCK_MONOTONIC, &ts );
+    return ( double )ts.tv_sec + ( double )ts.tv_nsec / 1e9;
 }
 
 void print_separator()
@@ -406,6 +418,8 @@ int inotifyapp_t::parse_dirqueue_entry()
         return 0;
     }
 
+    total_dirs++;
+
     size_t pathlen = strlen( path );
 
     for ( ;; )
@@ -597,6 +611,7 @@ void inotifyapp_t::print_inotify_proclist()
 
 bool inotifyapp_t::find_files_in_inode_set()
 {
+    double t0 = gettime();
     std::vector< pthread_t > threadids;
 
     assert( found_files.empty() );
@@ -637,6 +652,7 @@ bool inotifyapp_t::find_files_in_inode_set()
             printf( "Thread #%zu rc=%d status=%d\n", i, rc, ( int )( intptr_t )status );
     }
 
+    search_time = gettime() - t0;
     return true;
 }
 
@@ -659,9 +675,13 @@ void inotifyapp_t::print_found_files()
 
     for ( const filename_info_t &fname_info : found_files )
     {
-        printf( "%s%9lu%s [%lxh] %s\n", BGREEN, fname_info.statbuf.st_ino, RESET,
-                fname_info.statbuf.st_dev, fname_info.filename.c_str() );
+        printf( "%s%9lu%s [%u:%u] %s\n", BGREEN, fname_info.statbuf.st_ino, RESET,
+                major( fname_info.statbuf.st_dev ), minor( fname_info.statbuf.st_dev ),
+                fname_info.filename.c_str() );
     }
+
+    setlocale( LC_NUMERIC, "" );
+    printf( "\n%'lu dirs scanned (%.2f seconds)\n", total_dirs.load(), search_time );
 }
 
 static uint32_t get_inotify_procfs_value( const char *basename )
@@ -719,6 +739,5 @@ int main( int argc, char *argv[] )
     }
 
     app.shutdown();
-
     return 0;
 }
