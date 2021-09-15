@@ -579,7 +579,7 @@ void inotifyapp_t::print_inotify_proclist()
                 inotify_inode_sdevs.insert( inode_dev_str );
                 inotify_inode_set.insert( procinfo.watched_inodes[ i ].first );
 
-                if ( !( ++count % 10 ) )
+                if ( !( ++count % 5 ) )
                     printf( "\n     " );
             }
             printf( "\n" );
