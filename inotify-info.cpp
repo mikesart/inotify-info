@@ -62,18 +62,28 @@ struct filename_info_t
     std::string filename;       // Full path
 };
 
-struct thread_arg_t
+class thread_info_t
 {
+public:
+    void init( size_t thread_id, class inotifyapp_t *app_ptr)
+    {
+        id = thread_id;
+        papp = app_ptr;
+
+        pthread_id = 0;
+        total_dirs = 0;
+        scanning = true;
+    }
+
+public:
     size_t id;                  // Thread ID (0 for main thread)
-    pthread_t tid;              // pthread thread id
+    pthread_t pthread_id;
     uint32_t total_dirs;        // Total dirs scanned by this thread
     class inotifyapp_t *papp;
 
-    std::atomic_bool scanning;  // Whether this thread is currently scanning
+    std::atomic_bool scanning;  // Whether thread is currently scanning
 
     std::vector< filename_info_t > found_files;
-
-    std::vector< thread_arg_t > *thread_args;
 };
 
 struct procinfo_t
@@ -116,7 +126,7 @@ public:
         return string_format( "%lu [%u:%u]", inode.first, major( inode.second ), minor( inode.second ) );
     }
 
-    bool is_inode_watched( thread_arg_t *thread_arg, ino64_t inode )
+    bool is_inode_watched( thread_info_t *thread_info, ino64_t inode )
     {
         return inotify_inode_set.find( inode ) != inotify_inode_set.end();
     }
@@ -130,10 +140,10 @@ private:
 
     bool is_proc_in_cmdline_applist( const procinfo_t &procinfo );
 
-    void add_found_filename( thread_arg_t *thread_arg, const std::string &filename );
+    void add_found_filename( thread_info_t *thread_info, const std::string &filename );
 
     // Returns -1: queue empty, 0: open error, > 0 success
-    int parse_dirqueue_entry( thread_arg_t *parg );
+    int parse_dirqueue_entry( thread_info_t *parg );
 
     static void *parse_dirqueue_threadproc( void *arg );
 
@@ -163,6 +173,9 @@ private:
 
     // All found files which match inotify inodes, along with stat info
     std::vector< filename_info_t > all_found_files;
+
+    // Set to array of thread infos when dir scanning threads are running
+    std::vector< thread_info_t > *pthread_infos = nullptr;
 };
 
 struct linux_dirent64
@@ -396,7 +409,7 @@ void inotifyapp_t::shutdown()
     lfqueue_destroy( &dirqueue );
 }
 
-void inotifyapp_t::add_found_filename( thread_arg_t *thread_arg, const std::string &filename )
+void inotifyapp_t::add_found_filename( thread_info_t *thread_info, const std::string &filename )
 {
     struct stat statbuf = get_file_statbuf( filename.c_str() );
 
@@ -410,7 +423,7 @@ void inotifyapp_t::add_found_filename( thread_arg_t *thread_arg, const std::stri
         fname.st_dev = statbuf.st_dev;
         fname.st_ino = statbuf.st_ino;
 
-        thread_arg->found_files.push_back( fname );
+        thread_info->found_files.push_back( fname );
     }
 }
 
@@ -429,7 +442,7 @@ static bool is_dot_dir( const char *dname )
 }
 
 // Returns -1: queue empty, 0: open error, > 0 success
-int inotifyapp_t::parse_dirqueue_entry( thread_arg_t *parg )
+int inotifyapp_t::parse_dirqueue_entry( thread_info_t *parg )
 {
     char __attribute__( ( aligned( 16 ) ) ) buf[ 1024 ];
 
@@ -519,7 +532,7 @@ int inotifyapp_t::parse_dirqueue_entry( thread_arg_t *parg )
 
 void *inotifyapp_t::parse_dirqueue_threadproc( void *arg )
 {
-    thread_arg_t *parg = ( thread_arg_t * )arg;
+    thread_info_t *parg = ( thread_info_t * )arg;
     inotifyapp_t &app = *parg->papp;
 
     while ( !app.is_done )
@@ -530,17 +543,17 @@ void *inotifyapp_t::parse_dirqueue_threadproc( void *arg )
         }
 
         // Our dequeue has failed, but there may be other threads still parsing
-        // directories and adding them to the queue now.
+        //   directories and adding them to the queue now.
         // So if this is the main thread...
         if ( parg->id == 0 )
         {
             bool is_done = true;
 
             // Loop through all threads and check if any are still scanning
-            for ( const thread_arg_t& thread_arg : *parg->thread_args )
+            for ( const thread_info_t& thread_info : *app.pthread_infos )
             {
                 // If any are still scanning, we're not done yet
-                if ( thread_arg.scanning )
+                if ( thread_info.scanning )
                 {
                     is_done = false;
                     break;
@@ -668,15 +681,10 @@ void inotifyapp_t::print_inotify_proclist()
 bool inotifyapp_t::find_files_in_inode_set()
 {
     double t0 = gettime();
-    thread_arg_t thread_arg_main;
-    std::vector< thread_arg_t > thread_args( g_numthreads );
+    thread_info_t thread_info_main;
+    std::vector< thread_info_t > thread_infos( g_numthreads );
 
-    thread_arg_main.id = 0;
-    thread_arg_main.tid = 0;
-    thread_arg_main.total_dirs = 0;
-    thread_arg_main.papp = this;
-    thread_arg_main.scanning = true;
-    thread_arg_main.thread_args = &thread_args;
+    thread_info_main.init( 0, this );
 
     assert( all_found_files.empty() );
 
@@ -688,58 +696,59 @@ bool inotifyapp_t::find_files_in_inode_set()
     is_done = false;
 
     // Add root dir in case someone is watching it
-    add_found_filename( &thread_arg_main, "/" );
+    add_found_filename( &thread_info_main, "/" );
 
     // Parse root to add some dirs for threads to chew on
-    parse_dirqueue_entry( &thread_arg_main );
+    parse_dirqueue_entry( &thread_info_main );
+
+    pthread_infos = &thread_infos;
 
     for ( size_t i = 0; i < g_numthreads; i++ )
     {
-        thread_args[ i ].id = i + 1;
-        thread_args[ i ].total_dirs = 0;
-        thread_args[ i ].papp = this;
-        thread_args[ i ].scanning = true;
-        thread_args[ i ].thread_args = &thread_args;
+        thread_infos[ i ].init( i + 1, this );
 
-        if ( pthread_create( &thread_args[ i ].tid, NULL, &inotifyapp_t::parse_dirqueue_threadproc, &thread_args[ i ] ) )
+        if ( pthread_create( &thread_infos[ i ].pthread_id, NULL, &inotifyapp_t::parse_dirqueue_threadproc, &thread_infos[ i ] ) )
         {
-            thread_args[ i ].tid = 0;
+            thread_infos[ i ].pthread_id = 0;
+            thread_infos[ i ].scanning = false;
         }
     }
 
     // Put main thread to work
-    inotifyapp_t::parse_dirqueue_threadproc( &thread_arg_main );
+    inotifyapp_t::parse_dirqueue_threadproc( &thread_info_main );
 
-    for ( const thread_arg_t& thread_arg : thread_args )
+    for ( const thread_info_t& thread_info : thread_infos )
     {
         if ( g_verbose > 1 )
         {
-            printf( "Waiting for thread #%zu\n", thread_arg.id );
+            printf( "Waiting for thread #%zu\n", thread_info.id );
         }
 
-        if ( thread_arg.tid )
+        if ( thread_info.pthread_id )
         {
             void *status = NULL;
-            int rc = pthread_join( thread_arg.tid, &status );
+            int rc = pthread_join( thread_info.pthread_id, &status );
 
             if ( g_verbose > 1 )
             {
-                printf( "Thread #%zu rc=%d status=%d\n", thread_arg.id, rc, ( int )( intptr_t )status );
+                printf( "Thread #%zu rc=%d status=%d\n", thread_info.id, rc, ( int )( intptr_t )status );
             }
         }
     }
 
     // Coalesce data from all our threads
-    all_total_dirs = thread_arg_main.total_dirs;
-    all_found_files = thread_arg_main.found_files;
+    all_total_dirs = thread_info_main.total_dirs;
+    all_found_files = thread_info_main.found_files;
 
-    for ( const thread_arg_t& thread_arg : thread_args )
+    for ( const thread_info_t& thread_info : thread_infos )
     {
-        all_total_dirs += thread_arg.total_dirs;
+        all_total_dirs += thread_info.total_dirs;
 
         all_found_files.insert( all_found_files.end(),
-            thread_arg.found_files.begin(), thread_arg.found_files.end() );
+            thread_info.found_files.begin(), thread_info.found_files.end() );
     }
+
+    pthread_infos = nullptr;
 
     search_time = gettime() - t0;
     return true;
