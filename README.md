@@ -12,14 +12,14 @@ This app should hopefully help track down how many inotify watches, instances, a
 
 ## Build
 ```
-$ make
+$ make
 Building _release/inotify-info...
 ---- inotify-info.cpp ----
 ---- lfqueue/lfqueue.c ----
 Linking _release/inotify-info...
 ```
 ```
-$ CFG=debug make
+$ CFG=debug make
 Building _debug/inotify-info...
 ---- inotify-info.cpp ----
 ---- lfqueue/lfqueue.c ----
@@ -28,7 +28,7 @@ Linking _debug/inotify-info...
 
 ## Run (Prints Summary)
 ```
-$ _release/inotify-info 
+$ _release/inotify-info 
 ------------------------------------------------------------------------------
 INotify Limits:
   max_queued_events:  16384
@@ -59,7 +59,7 @@ Total inotify Instances: 18
 
 ## Run with Appname Filter
 ```
-$ _release/inotify-info xfce4
+$ _release/inotify-info xfce4
 ------------------------------------------------------------------------------
 INotify Limits:
   max_queued_events:  16384
@@ -108,7 +108,7 @@ Searching '/' for listed inodes... (8 threads)
 ```
 ## Run with Specific Pid(s)
 ```
-$ _release/inotify-info 3997
+$ _release/inotify-info 3997
 ------------------------------------------------------------------------------
 INotify Limits:
   max_queued_events:  16384
