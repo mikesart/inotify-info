@@ -75,6 +75,11 @@ public:
         scanning = true;
     }
 
+    // Returns -1: queue empty, 0: open error, > 0 success
+    int parse_dirqueue_entry();
+
+    void add_found_filename( const std::string &filename );
+
 public:
     size_t id;                  // Thread ID (0 for main thread)
     pthread_t pthread_id;
@@ -126,9 +131,16 @@ public:
         return string_format( "%lu [%u:%u]", inode.first, major( inode.second ), minor( inode.second ) );
     }
 
-    bool is_inode_watched( thread_info_t *thread_info, ino64_t inode )
+    bool is_inode_watched( ino64_t inode )
     {
         return inotify_inode_set.find( inode ) != inotify_inode_set.end();
+    }
+
+    bool is_inode_sdev_watched( ino64_t inode, dev_t sdev )
+    {
+        std::string inode_dev_str = get_inode_sdev_str( { inode, sdev } );
+
+        return inotify_inode_sdevs.find( inode_dev_str ) != inotify_inode_sdevs.end();
     }
 
     void queue_directory( char * path ) { lfqueue_enq( &dirqueue, path ); }
@@ -139,11 +151,6 @@ private:
     void print_usage( const char *appname );
 
     bool is_proc_in_cmdline_applist( const procinfo_t &procinfo );
-
-    void add_found_filename( thread_info_t *thread_info, const std::string &filename );
-
-    // Returns -1: queue empty, 0: open error, > 0 success
-    int parse_dirqueue_entry( thread_info_t *parg );
 
     static void *parse_dirqueue_threadproc( void *arg );
 
@@ -409,13 +416,12 @@ void inotifyapp_t::shutdown()
     lfqueue_destroy( &dirqueue );
 }
 
-void inotifyapp_t::add_found_filename( thread_info_t *thread_info, const std::string &filename )
+void thread_info_t::add_found_filename( const std::string &filename )
 {
     struct stat statbuf = get_file_statbuf( filename.c_str() );
 
     // Make sure the inode AND device ID match before adding.
-    std::string inode_dev_str = get_inode_sdev_str( { statbuf.st_ino, statbuf.st_dev } );
-    if ( inotify_inode_sdevs.find( inode_dev_str ) != inotify_inode_sdevs.end() )
+    if ( papp->is_inode_sdev_watched( statbuf.st_ino, statbuf.st_dev ) )
     {
         filename_info_t fname;
 
@@ -423,7 +429,7 @@ void inotifyapp_t::add_found_filename( thread_info_t *thread_info, const std::st
         fname.st_dev = statbuf.st_dev;
         fname.st_ino = statbuf.st_ino;
 
-        thread_info->found_files.push_back( fname );
+        found_files.push_back( fname );
     }
 }
 
@@ -442,18 +448,18 @@ static bool is_dot_dir( const char *dname )
 }
 
 // Returns -1: queue empty, 0: open error, > 0 success
-int inotifyapp_t::parse_dirqueue_entry( thread_info_t *parg )
+int thread_info_t::parse_dirqueue_entry()
 {
     char __attribute__( ( aligned( 16 ) ) ) buf[ 1024 ];
 
-    char *path = dequeue_directory();
+    char *path = papp->dequeue_directory();
     if ( !path )
     {
-        parg->scanning = false;
+        scanning = false;
         return -1;
     }
 
-    parg->scanning = true;
+    scanning = true;
 
     int fd = open( path, O_RDONLY | O_DIRECTORY, 0 );
     if ( fd < 0 )
@@ -462,7 +468,7 @@ int inotifyapp_t::parse_dirqueue_entry( thread_info_t *parg )
         return 0;
     }
 
-    parg->total_dirs++;
+    total_dirs++;
 
     size_t pathlen = strlen( path );
 
@@ -492,18 +498,18 @@ int inotifyapp_t::parse_dirqueue_entry( thread_info_t *parg )
             // DT_UNKNOWN  The file type could not be determined.
             if ( dirp->d_type == DT_REG )
             {
-                if ( is_inode_watched( parg, dirp->d_ino ) )
+                if ( papp->is_inode_watched( dirp->d_ino ) )
                 {
-                    add_found_filename( parg, std::string( path ) + d_name );
+                    add_found_filename( std::string( path ) + d_name );
                 }
             }
             else if ( dirp->d_type == DT_DIR )
             {
                 if ( !is_dot_dir( d_name ) )
                 {
-                    if ( is_inode_watched( parg, dirp->d_ino ) )
+                    if ( papp->is_inode_watched( dirp->d_ino ) )
                     {
-                        add_found_filename( parg, std::string( path ) + d_name + std::string( "/" ) );
+                        add_found_filename( std::string( path ) + d_name + std::string( "/" ) );
                     }
 
                     size_t len = strlen( dirp->d_name );
@@ -516,7 +522,7 @@ int inotifyapp_t::parse_dirqueue_entry( thread_info_t *parg )
                         newpath[ pathlen + len ] = '/';
                         newpath[ pathlen + len + 1 ] = 0;
 
-                        queue_directory( newpath );
+                        papp->queue_directory( newpath );
                     }
                 }
             }
@@ -538,7 +544,7 @@ void *inotifyapp_t::parse_dirqueue_threadproc( void *arg )
     while ( !app.is_done )
     {
         // Loop until the dequeue fails
-        while ( app.parse_dirqueue_entry( parg ) != -1 )
+        while ( parg->parse_dirqueue_entry() != -1 )
         {
         }
 
@@ -696,10 +702,10 @@ bool inotifyapp_t::find_files_in_inode_set()
     is_done = false;
 
     // Add root dir in case someone is watching it
-    add_found_filename( &thread_info_main, "/" );
+    thread_info_main.add_found_filename( "/" );
 
     // Parse root to add some dirs for threads to chew on
-    parse_dirqueue_entry( &thread_info_main );
+    thread_info_main.parse_dirqueue_entry();
 
     pthread_infos = &thread_infos;
 
