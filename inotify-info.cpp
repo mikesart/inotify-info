@@ -53,7 +53,7 @@
  */
 
 static int g_verbose = 0;
-static size_t g_numthreads = 8;
+static size_t g_numthreads = 32;
 
 struct filename_info_t
 {
@@ -361,6 +361,9 @@ void inotifyapp_t::parse_cmdline( int argc, char **argv )
         { "threads", required_argument, 0, 0 },
         { 0, 0, 0, 0 }
     };
+
+    // Let's pick the number of processors online (with a max of 32) for a default.
+    g_numthreads = std::min< uint32_t >( g_numthreads, sysconf( _SC_NPROCESSORS_ONLN ) );
 
     int c;
     int opt_ind = 0;
@@ -697,9 +700,9 @@ bool inotifyapp_t::find_files_in_inode_set()
         return false;
 
     g_numthreads = std::max< size_t >( 1, g_numthreads );
-    printf( "\n%sSearching '/' for listed inodes...%s (%lu threads)\n", BCYAN, RESET, g_numthreads );
-
     thread_infos.resize( g_numthreads );
+
+    printf( "\n%sSearching '/' for listed inodes...%s (%lu threads)\n", BCYAN, RESET, g_numthreads );
 
     // Init main thread
     thread_infos[ 0 ].init( 0, this );
