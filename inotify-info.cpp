@@ -32,6 +32,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <syscall.h>
 #include <unistd.h>
 #include <sys/sysmacros.h>
@@ -73,7 +74,7 @@ public:
     // Returns -1: queue empty, 0: open error, > 0 success
     int parse_dirqueue_entry();
 
-    void add_found_filename( const std::string &filename );
+    void add_found_filename( const std::string &filename, ino64_t st_ino  );
 
     void queue_directory( char *path );
     char *dequeue_directory();
@@ -226,16 +227,6 @@ std::string string_format( const char *fmt, ... )
     va_end( ap );
 
     return str;
-}
-
-static struct stat get_file_statbuf( const char *filename )
-{
-    struct stat statbuf;
-
-    if ( lstat( filename, &statbuf ) == -1 )
-        memset( &statbuf, 0, sizeof( statbuf ) );
-
-    return statbuf;
 }
 
 static std::string get_link_name( const char *Pathname )
@@ -438,18 +429,46 @@ char *thread_info_t::dequeue_directory()
     return path;
 }
 
-void thread_info_t::add_found_filename( const std::string &filename )
+static ino64_t get_file_inode( const char *filename )
 {
-    struct stat statbuf = get_file_statbuf( filename.c_str() );
+    int flags = AT_NO_AUTOMOUNT | AT_SYMLINK_NOFOLLOW | AT_STATX_DONT_SYNC;
+
+    struct statx statxbuf;
+    if ( !statx( 0, filename, flags, STATX_INO, &statxbuf ) )
+    {
+        return statxbuf.stx_ino;
+    }
+
+    printf( "ERROR: statx-ino( %s ) failed. Errno: %d\n", filename, errno );
+    return 0;
+}
+
+static dev_t get_file_dev_t( const char *filename )
+{
+    int flags = AT_NO_AUTOMOUNT | AT_SYMLINK_NOFOLLOW | AT_STATX_DONT_SYNC;
+
+    struct statx statxbuf;
+    if ( !statx( 0, filename, flags, 0, &statxbuf ) )
+    {
+        return makedev( statxbuf.stx_dev_major, statxbuf.stx_dev_minor );
+    }
+
+    printf( "ERROR: statx( %s ) failed. Errno: %d\n", filename, errno );
+    return 0;
+}
+
+void thread_info_t::add_found_filename( const std::string &filename, ino64_t st_ino )
+{
+    dev_t st_dev = get_file_dev_t( filename.c_str() );
 
     // Make sure the inode AND device ID match before adding.
-    if ( pnotify_app->is_inode_sdev_watched( statbuf.st_ino, statbuf.st_dev ) )
+    if ( pnotify_app->is_inode_sdev_watched( st_ino, st_dev ) )
     {
         filename_info_t fname;
 
         fname.filename = filename;
-        fname.st_dev = statbuf.st_dev;
-        fname.st_ino = statbuf.st_ino;
+        fname.st_dev = st_dev;
+        fname.st_ino = st_ino;
 
         found_files.push_back( fname );
     }
@@ -519,7 +538,7 @@ int thread_info_t::parse_dirqueue_entry()
             {
                 if ( pnotify_app->is_inode_watched( dirp->d_ino ) )
                 {
-                    add_found_filename( std::string( path ) + d_name );
+                    add_found_filename( std::string( path ) + d_name, dirp->d_ino );
                 }
             }
             // DT_DIR      This is a directory.
@@ -529,7 +548,7 @@ int thread_info_t::parse_dirqueue_entry()
                 {
                     if ( pnotify_app->is_inode_watched( dirp->d_ino ) )
                     {
-                        add_found_filename( std::string( path ) + d_name + std::string( "/" ) );
+                        add_found_filename( std::string( path ) + d_name + std::string( "/" ), dirp->d_ino );
                     }
 
                     size_t len = strlen( d_name );
@@ -714,7 +733,7 @@ bool inotifyapp_t::find_files_in_inode_set()
 
     // Add root dir in case someone is watching it
     // Parse root to add some dirs for threads to chew on
-    thread_infos[ 0 ].add_found_filename( "/" );
+    thread_infos[ 0 ].add_found_filename( "/", get_file_inode( "/" ) );
     thread_infos[ 0 ].queue_directory( strdup( "/" ) );
     thread_infos[ 0 ].parse_dirqueue_entry();
 
