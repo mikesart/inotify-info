@@ -65,15 +65,8 @@ struct filename_info_t
 class thread_info_t
 {
 public:
-    thread_info_t()
-    {
-        lfqueue_init( &dirqueue );
-    }
-
-    ~thread_info_t()
-    {
-        lfqueue_destroy( &dirqueue );
-    }
+    thread_info_t();
+    ~thread_info_t();
 
     void init( size_t thread_id, class inotifyapp_t *notifyapp_ptr );
 
@@ -82,7 +75,7 @@ public:
 
     void add_found_filename( const std::string &filename );
 
-    void queue_directory( char * path );
+    void queue_directory( char *path );
     char *dequeue_directory();
 
 public:
@@ -135,15 +128,15 @@ public:
     static std::string get_inode_sdev_str( const std::pair< ino64_t, dev_t > &inode );
 
     // Check if inode is in inotify_inode_set
-    bool is_inode_watched( ino64_t inode );
+    bool is_inode_watched( ino64_t inode ) const;
     // Check if inode+sdev is in inotify_inode_sdevs
-    bool is_inode_sdev_watched( ino64_t inode, dev_t sdev );
+    bool is_inode_sdev_watched( ino64_t inode, dev_t sdev ) const;
 
 private:
     void parse_cmdline( int argc, char **argv );
     void print_usage( const char *appname );
 
-    bool is_proc_in_cmdline_applist( const procinfo_t &procinfo );
+    bool is_proc_in_cmdline_applist( const procinfo_t &procinfo ) const;
 
     static void *parse_dirqueue_threadproc( void *arg );
 
@@ -170,6 +163,7 @@ protected:
     // All found files which match inotify inodes, along with stat info
     std::vector< filename_info_t > all_found_files;
 
+    // Array of threads. Index 0 is main thread.
     std::vector< thread_info_t > thread_infos;
 
     friend class thread_info_t;
@@ -238,7 +232,7 @@ static struct stat get_file_statbuf( const char *filename )
 {
     struct stat statbuf;
 
-    if ( stat( filename, &statbuf ) == -1 )
+    if ( lstat( filename, &statbuf ) == -1 )
         memset( &statbuf, 0, sizeof( statbuf ) );
 
     return statbuf;
@@ -403,6 +397,16 @@ void inotifyapp_t::shutdown()
 {
 }
 
+thread_info_t::thread_info_t()
+{
+    lfqueue_init( &dirqueue );
+}
+
+thread_info_t::~thread_info_t()
+{
+    lfqueue_destroy( &dirqueue );
+}
+
 void thread_info_t::init( size_t thread_id, class inotifyapp_t *notifyapp_ptr )
 {
     id = thread_id;
@@ -505,19 +509,20 @@ int thread_info_t::parse_dirqueue_entry()
 
             // DT_BLK      This is a block device.
             // DT_CHR      This is a character device.
-            // DT_DIR      This is a directory.
             // DT_FIFO     This is a named pipe (FIFO).
-            // DT_LNK      This is a symbolic link.
-            // DT_REG      This is a regular file.
             // DT_SOCK     This is a UNIX domain socket.
             // DT_UNKNOWN  The file type could not be determined.
-            if ( dirp->d_type == DT_REG )
+
+            // DT_REG      This is a regular file.
+            // DT_LNK      This is a symbolic link.
+            if ( dirp->d_type == DT_REG || dirp->d_type == DT_LNK )
             {
                 if ( pnotify_app->is_inode_watched( dirp->d_ino ) )
                 {
                     add_found_filename( std::string( path ) + d_name );
                 }
             }
+            // DT_DIR      This is a directory.
             else if ( dirp->d_type == DT_DIR )
             {
                 if ( !is_dot_dir( d_name ) )
@@ -527,13 +532,13 @@ int thread_info_t::parse_dirqueue_entry()
                         add_found_filename( std::string( path ) + d_name + std::string( "/" ) );
                     }
 
-                    size_t len = strlen( dirp->d_name );
+                    size_t len = strlen( d_name );
                     char *newpath = ( char * )malloc( pathlen + len + 2 );
 
                     if ( newpath )
                     {
                         strcpy( newpath, path );
-                        strcpy( newpath + pathlen, dirp->d_name );
+                        strcpy( newpath + pathlen, d_name );
                         newpath[ pathlen + len ] = '/';
                         newpath[ pathlen + len + 1 ] = 0;
 
@@ -616,19 +621,19 @@ std::string inotifyapp_t::get_inode_sdev_str( const std::pair< ino64_t, dev_t > 
     return string_format( "%lu [%u:%u]", inode.first, major( inode.second ), minor( inode.second ) );
 }
 
-bool inotifyapp_t::is_inode_watched( ino64_t inode )
+bool inotifyapp_t::is_inode_watched( ino64_t inode ) const
 {
     return inotify_inode_set.find( inode ) != inotify_inode_set.end();
 }
 
-bool inotifyapp_t::is_inode_sdev_watched( ino64_t inode, dev_t sdev )
+bool inotifyapp_t::is_inode_sdev_watched( ino64_t inode, dev_t sdev ) const
 {
     std::string inode_dev_str = get_inode_sdev_str( { inode, sdev } );
 
     return inotify_inode_sdevs.find( inode_dev_str ) != inotify_inode_sdevs.end();
 }
 
-bool inotifyapp_t::is_proc_in_cmdline_applist( const procinfo_t &procinfo )
+bool inotifyapp_t::is_proc_in_cmdline_applist( const procinfo_t &procinfo ) const
 {
     for ( const std::string &str : cmdline_applist )
     {
