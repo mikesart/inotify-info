@@ -42,6 +42,7 @@
 #include <vector>
 #include <algorithm>
 #include <unordered_set>
+#include <unordered_map>
 
 #include "inotify-info.h"
 #include "lfqueue/lfqueue.h"
@@ -56,13 +57,19 @@
 static int g_verbose = 0;
 static size_t g_numthreads = 32;
 
+/*
+ * filename info
+ */
 struct filename_info_t
 {
-    dev_t st_dev;               // Device ID containing file
-    ino_t st_ino;               // Inode number
-    std::string filename;       // Full path
+    ino64_t inode;  // Inode number
+    dev_t dev;      // Device ID containing file
+    std::string filename;
 };
 
+/*
+ * thread info
+ */
 class thread_info_t
 {
 public:
@@ -71,26 +78,38 @@ public:
 
     void init( size_t thread_id, class inotifyapp_t *notifyapp_ptr );
 
-    // Returns -1: queue empty, 0: open error, > 0 success
-    int parse_dirqueue_entry();
-
-    void add_found_filename( const std::string &filename, ino64_t st_ino  );
-
     void queue_directory( char *path );
     char *dequeue_directory();
 
+    // Returns -1: queue empty, 0: open error, > 0 success
+    int parse_dirqueue_entry();
+
+    void add_filename( ino64_t inode, const char *path, const char *d_name, bool is_dir );
+
 public:
-    uint32_t id;                  // Thread ID (0 for main thread)
+    uint32_t num;           // Thread number (0 for main thread)
     pthread_t pthread_id;
 
     lfqueue_t dirqueue;
 
-    uint32_t total_dirs;          // Total dirs scanned by this thread
+    uint32_t scanned_dirs;  // Total dirs scanned by this thread
     std::vector< filename_info_t > found_files;
 
     class inotifyapp_t *pnotify_app;
 };
 
+/*
+ * inode / device pair
+ */
+struct inode_dev_pair_t
+{
+    ino64_t inode;  // Inode number
+    dev_t dev;      // Device ID containing file
+};
+
+/*
+ * inotify process info
+ */
 struct procinfo_t
 {
     pid_t pid = 0;
@@ -108,10 +127,13 @@ struct procinfo_t
     // Inotify fdset filenames
     std::vector< std::string > fdset_filenames;
 
-    // Inode number and ID of device containing watched file
-    std::vector< std::pair< ino64_t, dev_t > > watched_inodes;
+    // Inode number and device ID containing watched file
+    std::vector< inode_dev_pair_t > watched_inodes;
 };
 
+/*
+ * main inotify app
+ */
 class inotifyapp_t
 {
 public:
@@ -122,16 +144,14 @@ public:
     bool init_inotify_proclist();
     void print_inotify_proclist();
 
+    // Search root filesystem for files and dirs with our watched inodes
     bool find_files_in_inode_set();
+
+    // Spew filenames we found
     void print_found_files();
 
-    // Create unique string from inode number + device ID
-    static std::string get_inode_sdev_str( const std::pair< ino64_t, dev_t > &inode );
-
-    // Check if inode is in inotify_inode_set
-    bool is_inode_watched( ino64_t inode ) const;
-    // Check if inode+sdev is in inotify_inode_sdevs
-    bool is_inode_sdev_watched( ino64_t inode, dev_t sdev ) const;
+    // Inode -> set of device IDs (or null if inode not watched)
+    const std::unordered_set< dev_t > *get_inode_dev_set( ino64_t inode ) const;
 
 private:
     void parse_cmdline( int argc, char **argv );
@@ -144,22 +164,18 @@ private:
 protected:
     uint32_t total_watches = 0;
     uint32_t total_instances = 0;
+    uint32_t total_scanned_dirs = 0;
 
     double search_time = 0.0;
-    uint32_t all_total_dirs = 0;
 
     // Command line app args
     std::vector< std::string > cmdline_applist;
 
-    // List of procs with inotify watches
+    // List of processes with inotify watches
     std::vector< procinfo_t > inotify_proclist;
 
-    // Set of all inotify inodes watched. Note that this is inodes
-    // only, not device IDs - we parse false positives out when adding.
-    std::unordered_set< ino64_t > inotify_inode_set;
-
-    // Set of all watched inode + device IDs
-    std::unordered_set< std::string > inotify_inode_sdevs;
+    // Map of all inotify inodes watched to the set of devices they are on
+    std::unordered_map< ino64_t, std::unordered_set< dev_t > > inode_set;
 
     // All found files which match inotify inodes, along with stat info
     std::vector< filename_info_t > all_found_files;
@@ -170,6 +186,9 @@ protected:
     friend class thread_info_t;
 };
 
+/*
+ * getdents64 syscall
+ */
 struct linux_dirent64
 {
     uint64_t d_ino;          // Inode number
@@ -280,8 +299,8 @@ static uint32_t inotify_parse_fdinfo_file( procinfo_t &procinfo, const char *fds
                     //   Assuming that the sdev field is encoded according to Linux's so-called "huge
                     //   encoding", which uses 20 bits (instead of 8) for minor numbers, in bitwise
                     //   parlance the major number is sdev >> 20 while the minor is sdev & 0xfffff.
-                    dev_t major = sdev_val >> 20;
-                    dev_t minor = sdev_val & 0xfffff;
+                    unsigned int major = sdev_val >> 20;
+                    unsigned int minor = sdev_val & 0xfffff;
 
                     procinfo.watched_inodes.push_back( { inode_val, makedev( major, minor ) } );
                 }
@@ -341,7 +360,8 @@ void inotifyapp_t::print_usage( const char *appname )
 
 void inotifyapp_t::parse_cmdline( int argc, char **argv )
 {
-    static struct option long_opts[] = {
+    static struct option long_opts[] =
+    {
         { "verbose", no_argument, 0, 0 },
         { "threads", required_argument, 0, 0 },
         { 0, 0, 0, 0 }
@@ -388,6 +408,12 @@ void inotifyapp_t::shutdown()
 {
 }
 
+const std::unordered_set< dev_t > *inotifyapp_t::get_inode_dev_set( ino64_t inode ) const
+{
+    return ( inode_set.find( inode ) != inode_set.end() ) ?
+        &inode_set.at( inode ) : nullptr;
+}
+
 thread_info_t::thread_info_t()
 {
     lfqueue_init( &dirqueue );
@@ -398,16 +424,16 @@ thread_info_t::~thread_info_t()
     lfqueue_destroy( &dirqueue );
 }
 
-void thread_info_t::init( size_t thread_id, class inotifyapp_t *notifyapp_ptr )
+void thread_info_t::init( size_t thread_num, class inotifyapp_t *notifyapp_ptr )
 {
-    id = thread_id;
     pthread_id = 0;
-    total_dirs = 0;
+    scanned_dirs = 0;
 
+    num = thread_num;
     pnotify_app = notifyapp_ptr;
 }
 
-void thread_info_t::queue_directory( char * path )
+void thread_info_t::queue_directory( char *path )
 {
     lfqueue_enq( &dirqueue, path );
 }
@@ -429,48 +455,41 @@ char *thread_info_t::dequeue_directory()
     return path;
 }
 
-static ino64_t get_file_inode( const char *filename )
+struct statx mystatx( const char *filename, unsigned int mask = 0 )
 {
+    struct statx statxbuf;
     int flags = AT_NO_AUTOMOUNT | AT_SYMLINK_NOFOLLOW | AT_STATX_DONT_SYNC;
 
-    struct statx statxbuf;
-    if ( !statx( 0, filename, flags, STATX_INO, &statxbuf ) )
+    if ( statx( 0, filename, flags, mask, &statxbuf ) == -1 )
     {
-        return statxbuf.stx_ino;
+        printf( "ERROR: statx-ino( %s ) failed. Errno: %d\n", filename, errno );
+        memset( &statxbuf, 0, sizeof( statxbuf ) );
     }
 
-    printf( "ERROR: statx-ino( %s ) failed. Errno: %d\n", filename, errno );
-    return 0;
+    return statxbuf;
 }
 
-static dev_t get_file_dev_t( const char *filename )
+void thread_info_t::add_filename( ino64_t inode, const char *path, const char *d_name, bool is_dir )
 {
-    int flags = AT_NO_AUTOMOUNT | AT_SYMLINK_NOFOLLOW | AT_STATX_DONT_SYNC;
+    const std::unordered_set< dev_t > *dev_set = pnotify_app->get_inode_dev_set( inode );
 
-    struct statx statxbuf;
-    if ( !statx( 0, filename, flags, 0, &statxbuf ) )
+    if ( dev_set )
     {
-        return makedev( statxbuf.stx_dev_major, statxbuf.stx_dev_minor );
-    }
+        std::string filename = std::string( path ) + d_name;
+        struct statx statxbuf = mystatx( filename.c_str() );
+        dev_t dev = makedev( statxbuf.stx_dev_major, statxbuf.stx_dev_minor );
 
-    printf( "ERROR: statx( %s ) failed. Errno: %d\n", filename, errno );
-    return 0;
-}
+        // Make sure the inode AND device ID match before adding.
+        if ( dev_set->find( dev ) != dev_set->end() )
+        {
+            filename_info_t fname;
 
-void thread_info_t::add_found_filename( const std::string &filename, ino64_t st_ino )
-{
-    dev_t st_dev = get_file_dev_t( filename.c_str() );
+            fname.filename = is_dir ? filename + "/" : filename;
+            fname.inode = inode;
+            fname.dev = dev;
 
-    // Make sure the inode AND device ID match before adding.
-    if ( pnotify_app->is_inode_sdev_watched( st_ino, st_dev ) )
-    {
-        filename_info_t fname;
-
-        fname.filename = filename;
-        fname.st_dev = st_dev;
-        fname.st_ino = st_ino;
-
-        found_files.push_back( fname );
+            found_files.push_back( fname );
+        }
     }
 }
 
@@ -506,22 +525,22 @@ int thread_info_t::parse_dirqueue_entry()
         return 0;
     }
 
-    total_dirs++;
+    scanned_dirs++;
 
     size_t pathlen = strlen( path );
 
     for ( ;; )
     {
-        int num = sys_getdents64( fd, buf, sizeof( buf ) );
-        if ( num < 0 )
+        int ret = sys_getdents64( fd, buf, sizeof( buf ) );
+        if ( ret < 0 )
         {
-            printf( "ERROR: sys_getdents64 failed on '%s': %d errno:%d\n", path, num, errno );
+            printf( "ERROR: sys_getdents64 failed on '%s': %d errno:%d\n", path, ret, errno );
             break;
         }
-        if ( num == 0 )
+        if ( ret == 0 )
             break;
 
-        for ( int bpos = 0; bpos < num; )
+        for ( int bpos = 0; bpos < ret; )
         {
             struct linux_dirent64 *dirp = ( struct linux_dirent64 * )( buf + bpos );
             const char *d_name = dirp->d_name;
@@ -536,20 +555,14 @@ int thread_info_t::parse_dirqueue_entry()
             // DT_LNK      This is a symbolic link.
             if ( dirp->d_type == DT_REG || dirp->d_type == DT_LNK )
             {
-                if ( pnotify_app->is_inode_watched( dirp->d_ino ) )
-                {
-                    add_found_filename( std::string( path ) + d_name, dirp->d_ino );
-                }
+                add_filename( dirp->d_ino, path, d_name, false );
             }
             // DT_DIR      This is a directory.
             else if ( dirp->d_type == DT_DIR )
             {
                 if ( !is_dot_dir( d_name ) )
                 {
-                    if ( pnotify_app->is_inode_watched( dirp->d_ino ) )
-                    {
-                        add_found_filename( std::string( path ) + d_name + std::string( "/" ), dirp->d_ino );
-                    }
+                    add_filename( dirp->d_ino, path, d_name, true );
 
                     size_t len = strlen( d_name );
                     char *newpath = ( char * )malloc( pathlen + len + 2 );
@@ -634,24 +647,6 @@ bool inotifyapp_t::init_inotify_proclist()
     return true;
 }
 
-// Create unique string from inode number + device ID
-std::string inotifyapp_t::get_inode_sdev_str( const std::pair< ino64_t, dev_t > &inode )
-{
-    return string_format( "%lu [%u:%u]", inode.first, major( inode.second ), minor( inode.second ) );
-}
-
-bool inotifyapp_t::is_inode_watched( ino64_t inode ) const
-{
-    return inotify_inode_set.find( inode ) != inotify_inode_set.end();
-}
-
-bool inotifyapp_t::is_inode_sdev_watched( ino64_t inode, dev_t sdev ) const
-{
-    std::string inode_dev_str = get_inode_sdev_str( { inode, sdev } );
-
-    return inotify_inode_sdevs.find( inode_dev_str ) != inotify_inode_sdevs.end();
-}
-
 bool inotifyapp_t::is_proc_in_cmdline_applist( const procinfo_t &procinfo ) const
 {
     for ( const std::string &str : cmdline_applist )
@@ -691,12 +686,13 @@ void inotifyapp_t::print_inotify_proclist()
             printf( "     " );
             for ( size_t i = 0; i < procinfo.watched_inodes.size(); i++ )
             {
-                std::string inode_dev_str = get_inode_sdev_str( procinfo.watched_inodes[ i ] );
+                const inode_dev_pair_t &watch_info = procinfo.watched_inodes[ i ];
+                std::string inode_device_str = string_format( "%lu [%u:%u]",
+                    watch_info.inode, major( watch_info.dev ), minor( watch_info.dev ) );
 
-                printf( " %s%s%s ", BGRAY, inode_dev_str.c_str(), RESET );
+                printf( " %s%s%s ", BGRAY, inode_device_str.c_str(), RESET );
 
-                inotify_inode_sdevs.insert( inode_dev_str );
-                inotify_inode_set.insert( procinfo.watched_inodes[ i ].first );
+                inode_set[ watch_info.inode ].insert( watch_info.dev );
 
                 if ( !( ++count % 5 ) )
                     printf( "\n     " );
@@ -720,7 +716,7 @@ bool inotifyapp_t::find_files_in_inode_set()
 
     assert( all_found_files.empty() );
 
-    if ( inotify_inode_set.empty() )
+    if ( inode_set.empty() )
         return false;
 
     g_numthreads = std::max< size_t >( 1, g_numthreads );
@@ -733,7 +729,7 @@ bool inotifyapp_t::find_files_in_inode_set()
 
     // Add root dir in case someone is watching it
     // Parse root to add some dirs for threads to chew on
-    thread_infos[ 0 ].add_found_filename( "/", get_file_inode( "/" ) );
+    thread_infos[ 0 ].add_filename( mystatx( "/", STATX_INO ).stx_ino, "/", "", false );
     thread_infos[ 0 ].queue_directory( strdup( "/" ) );
     thread_infos[ 0 ].parse_dirqueue_entry();
 
@@ -754,7 +750,7 @@ bool inotifyapp_t::find_files_in_inode_set()
     {
         if ( g_verbose > 1 )
         {
-            printf( "Waiting for thread #%u\n", thread_info.id );
+            printf( "Waiting for thread #%u\n", thread_info.num );
         }
 
         if ( thread_info.pthread_id )
@@ -764,7 +760,7 @@ bool inotifyapp_t::find_files_in_inode_set()
 
             if ( g_verbose > 1 )
             {
-                printf( "Thread #%u rc=%d status=%d\n", thread_info.id, rc, ( int )( intptr_t )status );
+                printf( "Thread #%u rc=%d status=%d\n", thread_info.num, rc, ( int )( intptr_t )status );
             }
         }
     }
@@ -772,7 +768,7 @@ bool inotifyapp_t::find_files_in_inode_set()
     // Coalesce data from all our threads
     for ( const thread_info_t &thread_info : thread_infos )
     {
-        all_total_dirs += thread_info.total_dirs;
+        total_scanned_dirs += thread_info.scanned_dirs;
 
         all_found_files.insert( all_found_files.end(),
             thread_info.found_files.begin(), thread_info.found_files.end() );
@@ -780,7 +776,7 @@ bool inotifyapp_t::find_files_in_inode_set()
         if ( g_verbose > 1 )
         {
             printf( "Thread #%u: %u dirs, %zu files found\n",
-                thread_info.id, thread_info.total_dirs, thread_info.found_files.size() );
+                thread_info.num, thread_info.scanned_dirs, thread_info.found_files.size() );
         }
     }
 
@@ -796,9 +792,9 @@ void inotifyapp_t::print_found_files()
         {
             bool operator()( const filename_info_t &a, const filename_info_t &b ) const
             {
-                if ( a.st_dev == b.st_dev )
-                    return a.st_ino < b.st_ino;
-                return a.st_dev < b.st_dev;
+                if ( a.dev == b.dev )
+                    return a.inode < b.inode;
+                return a.dev < b.dev;
             }
         } filename_info_less_func;
 
@@ -806,16 +802,16 @@ void inotifyapp_t::print_found_files()
 
         for ( const filename_info_t &fname_info : all_found_files )
         {
-            printf( "%s%9lu%s [%u:%u] %s\n", BGREEN, fname_info.st_ino, RESET,
-                    major( fname_info.st_dev ), minor( fname_info.st_dev ),
-                    fname_info.filename.c_str() );
+            printf( "%s%9lu%s [%u:%u] %s\n", BGREEN, fname_info.inode, RESET,
+                major( fname_info.dev ), minor( fname_info.dev ),
+                fname_info.filename.c_str() );
         }
     }
 
-    if ( all_total_dirs )
+    if ( total_scanned_dirs )
     {
         setlocale( LC_NUMERIC, "" );
-        printf( "\n%'u dirs scanned (%.2f seconds)\n", all_total_dirs, search_time );
+        printf( "\n%'u dirs scanned (%.2f seconds)\n", total_scanned_dirs, search_time );
     }
 }
 
@@ -837,7 +833,7 @@ static uint32_t get_inotify_procfs_value( const char *basename )
     return interface_val;
 }
 
-void print_inotify_limits()
+static void print_inotify_limits()
 {
     uint32_t max_queued_events = get_inotify_procfs_value( "max_queued_events" );
     uint32_t max_user_instances = get_inotify_procfs_value( "max_user_instances" );
