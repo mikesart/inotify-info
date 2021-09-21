@@ -22,7 +22,6 @@
  * THE SOFTWARE.
  */
 
-#include <assert.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <getopt.h>
@@ -68,46 +67,6 @@ struct filename_info_t
 };
 
 /*
- * thread info
- */
-class thread_info_t
-{
-public:
-    thread_info_t();
-    ~thread_info_t();
-
-    void init( size_t thread_id, class inotifyapp_t *notifyapp_ptr );
-
-    void queue_directory( char *path );
-    char *dequeue_directory();
-
-    // Returns -1: queue empty, 0: open error, > 0 success
-    int parse_dirqueue_entry();
-
-    void add_filename( ino64_t inode, const char *path, const char *d_name, bool is_dir );
-
-public:
-    uint32_t num;           // Thread number (0 for main thread)
-    pthread_t pthread_id;
-
-    lfqueue_t dirqueue;
-
-    uint32_t scanned_dirs;  // Total dirs scanned by this thread
-    std::vector< filename_info_t > found_files;
-
-    class inotifyapp_t *pnotify_app;
-};
-
-/*
- * inode / device pair
- */
-struct inode_dev_pair_t
-{
-    ino64_t inode;  // Inode number
-    dev_t dev;      // Device ID containing file
-};
-
-/*
  * inotify process info
  */
 struct procinfo_t
@@ -118,6 +77,9 @@ struct procinfo_t
     uint32_t watches = 0;
     uint32_t instances = 0;
 
+    // This appname or pid found in command line?
+    bool in_cmd_line = false;
+
     // Full executable path
     std::string executable;
 
@@ -127,63 +89,47 @@ struct procinfo_t
     // Inotify fdset filenames
     std::vector< std::string > fdset_filenames;
 
-    // Inode number and device ID containing watched file
-    std::vector< inode_dev_pair_t > watched_inodes;
+    // Device id map -> set of inodes for that device id
+    std::unordered_map< dev_t, std::unordered_set< ino64_t > > dev_map;
 };
 
 /*
- * main inotify app
+ * thread info
  */
-class inotifyapp_t
+typedef std::unordered_map< ino64_t, std::unordered_set< dev_t > > inode_set_t;
+typedef std::vector< class thread_info_t > thread_info_array_t;
+
+class thread_info_t
 {
 public:
-    void init( int argc, char *argv[] );
-    void shutdown();
+    thread_info_t();
+    ~thread_info_t();
 
-    // Read /proc dir searching for "anon_inode:inotify" fd links
-    bool init_inotify_proclist();
-    void print_inotify_proclist();
+    void init( size_t thread_id, thread_info_array_t &thread_infos, inode_set_t &inode_set );
 
-    // Search root filesystem for files and dirs with our watched inodes
-    bool find_files_in_inode_set();
+    void queue_directory( char *path );
+    char *dequeue_directory();
 
-    // Spew filenames we found
-    void print_found_files();
+    // Returns -1: queue empty, 0: open error, > 0 success
+    int parse_dirqueue_entry();
 
-    // Inode -> set of device IDs (or null if inode not watched)
-    const std::unordered_set< dev_t > *get_inode_dev_set( ino64_t inode ) const;
+    void add_filename( ino64_t inode, const char *path, const char *d_name, bool is_dir );
 
-private:
-    void parse_cmdline( int argc, char **argv );
-    void print_usage( const char *appname );
+public:
+    uint32_t num = 0;           // Thread number (0 for main thread)
+    pthread_t pthread_id = 0;
+    uint32_t scanned_dirs = 0;  // Total dirs scanned by this thread
 
-    bool is_proc_in_cmdline_applist( const procinfo_t &procinfo ) const;
-
-    static void *parse_dirqueue_threadproc( void *arg );
-
-protected:
-    uint32_t total_watches = 0;
-    uint32_t total_instances = 0;
-    uint32_t total_scanned_dirs = 0;
-
-    double search_time = 0.0;
-
-    // Command line app args
-    std::vector< std::string > cmdline_applist;
-
-    // List of processes with inotify watches
-    std::vector< procinfo_t > inotify_proclist;
-
-    // Map of all inotify inodes watched to the set of devices they are on
-    std::unordered_map< ino64_t, std::unordered_set< dev_t > > inode_set;
-
-    // All found files which match inotify inodes, along with stat info
-    std::vector< filename_info_t > all_found_files;
+    lfqueue_t dirqueue;
 
     // Array of threads. Index 0 is main thread.
-    std::vector< thread_info_t > thread_infos;
+    thread_info_array_t *pthread_infos = nullptr;
 
-    friend class thread_info_t;
+    // Map of all inotify inodes watched to the set of devices they are on
+    const inode_set_t *pinode_set = nullptr;
+
+    // Files found by this thread
+    std::vector< filename_info_t > found_files;
 };
 
 /*
@@ -302,7 +248,8 @@ static uint32_t inotify_parse_fdinfo_file( procinfo_t &procinfo, const char *fds
                     unsigned int major = sdev_val >> 20;
                     unsigned int minor = sdev_val & 0xfffff;
 
-                    procinfo.watched_inodes.push_back( { inode_val, makedev( major, minor ) } );
+                    // Add inode to this device map
+                    procinfo.dev_map[ makedev( major, minor ) ].insert( inode_val );
                 }
             }
         }
@@ -349,7 +296,7 @@ static void inotify_parse_fddir( procinfo_t &procinfo )
     closedir( dir_fd );
 }
 
-void inotifyapp_t::print_usage( const char *appname )
+static void print_usage( const char *appname )
 {
     printf( "Usage: %s [--threads=##] [appname | pid...]\n", appname );
     printf( "    [-vv]\n" );
@@ -358,7 +305,7 @@ void inotifyapp_t::print_usage( const char *appname )
     exit( -1 );
 }
 
-void inotifyapp_t::parse_cmdline( int argc, char **argv )
+static void parse_cmdline( int argc, char **argv, std::vector< std::string > &cmdline_applist )
 {
     static struct option long_opts[] =
     {
@@ -399,21 +346,6 @@ void inotifyapp_t::parse_cmdline( int argc, char **argv )
     }
 }
 
-void inotifyapp_t::init( int argc, char *argv[] )
-{
-    parse_cmdline( argc, argv );
-}
-
-void inotifyapp_t::shutdown()
-{
-}
-
-const std::unordered_set< dev_t > *inotifyapp_t::get_inode_dev_set( ino64_t inode ) const
-{
-    return ( inode_set.find( inode ) != inode_set.end() ) ?
-        &inode_set.at( inode ) : nullptr;
-}
-
 thread_info_t::thread_info_t()
 {
     lfqueue_init( &dirqueue );
@@ -424,13 +356,12 @@ thread_info_t::~thread_info_t()
     lfqueue_destroy( &dirqueue );
 }
 
-void thread_info_t::init( size_t thread_num, class inotifyapp_t *notifyapp_ptr )
+void thread_info_t::init( size_t thread_num, thread_info_array_t &thread_infos, inode_set_t &inode_set  )
 {
-    pthread_id = 0;
-    scanned_dirs = 0;
-
     num = thread_num;
-    pnotify_app = notifyapp_ptr;
+
+    pthread_infos = &thread_infos;
+    pinode_set = &inode_set;
 }
 
 void thread_info_t::queue_directory( char *path )
@@ -444,7 +375,8 @@ char *thread_info_t::dequeue_directory()
 
     if ( !path )
     {
-        for ( thread_info_t &thread_info : pnotify_app->thread_infos )
+        // Nothing on our queue, check queues on other threads
+        for ( thread_info_t &thread_info : *pthread_infos )
         {
             path = ( char * )lfqueue_deq( &thread_info.dirqueue );
             if ( path )
@@ -471,16 +403,18 @@ struct statx mystatx( const char *filename, unsigned int mask = 0 )
 
 void thread_info_t::add_filename( ino64_t inode, const char *path, const char *d_name, bool is_dir )
 {
-    const std::unordered_set< dev_t > *dev_set = pnotify_app->get_inode_dev_set( inode );
+    auto it = pinode_set->find( inode );
 
-    if ( dev_set )
+    if ( it != pinode_set->end() )
     {
+        const std::unordered_set< dev_t > &dev_set = it->second;
+
         std::string filename = std::string( path ) + d_name;
         struct statx statxbuf = mystatx( filename.c_str() );
         dev_t dev = makedev( statxbuf.stx_dev_major, statxbuf.stx_dev_minor );
 
         // Make sure the inode AND device ID match before adding.
-        if ( dev_set->find( dev ) != dev_set->end() )
+        if ( dev_set.find( dev ) != dev_set.end() )
         {
             filename_info_t fname;
 
@@ -588,21 +522,23 @@ int thread_info_t::parse_dirqueue_entry()
     return 1;
 }
 
-void *inotifyapp_t::parse_dirqueue_threadproc( void *arg )
+static bool is_proc_in_cmdline_applist( const procinfo_t &procinfo, std::vector< std::string > &cmdline_applist )
 {
-    thread_info_t *pthread_info = ( thread_info_t * )arg;
-
-    for ( ;; )
+    for ( const std::string &str : cmdline_applist )
     {
-        // Loop until all the dequeue(s) fail
-        if ( pthread_info->parse_dirqueue_entry() == -1 )
-            break;
+        // Check if our command line string is a subset of this appname
+        if ( strstr( procinfo.appname.c_str(), str.c_str() ) )
+            return true;
+
+        // Check if the PIDs match
+        if ( atoll( str.c_str() ) == procinfo.pid )
+            return true;
     }
 
-    return nullptr;
+    return false;
 }
 
-bool inotifyapp_t::init_inotify_proclist()
+static bool init_inotify_proclist( std::vector< procinfo_t > &inotify_proclist )
 {
     DIR *dir_proc = opendir( "/proc" );
 
@@ -611,8 +547,6 @@ bool inotifyapp_t::init_inotify_proclist()
         printf( "ERROR: opendir /proc failed: %d\n", errno );
         return false;
     }
-
-    assert( inotify_proclist.empty() );
 
     for ( ;; )
     {
@@ -647,28 +581,12 @@ bool inotifyapp_t::init_inotify_proclist()
     return true;
 }
 
-bool inotifyapp_t::is_proc_in_cmdline_applist( const procinfo_t &procinfo ) const
-{
-    for ( const std::string &str : cmdline_applist )
-    {
-        if ( strstr( procinfo.appname.c_str(), str.c_str() ) )
-            return true;
-
-        if ( atoll( str.c_str() ) == procinfo.pid )
-            return true;
-    }
-
-    return false;
-}
-
-void inotifyapp_t::print_inotify_proclist()
+static void print_inotify_proclist( std::vector< procinfo_t > &inotify_proclist )
 {
     printf( "%s     Pid  App                        Watches   Instances%s\n", BCYAN, RESET );
 
     for ( procinfo_t &procinfo : inotify_proclist )
     {
-        bool in_proc_list = is_proc_in_cmdline_applist( procinfo );
-
         printf( "  % 7d %s%-30s%s %3u %3u\n", procinfo.pid, BYELLOW, procinfo.appname.c_str(), RESET, procinfo.watches, procinfo.instances );
 
         if ( g_verbose > 1 )
@@ -679,45 +597,63 @@ void inotifyapp_t::print_inotify_proclist()
             }
         }
 
-        if ( in_proc_list )
+        if ( procinfo.in_cmd_line  )
         {
-            int count = 0;
-
-            printf( "     " );
-            for ( size_t i = 0; i < procinfo.watched_inodes.size(); i++ )
+            for ( const auto &it1 : procinfo.dev_map )
             {
-                const inode_dev_pair_t &watch_info = procinfo.watched_inodes[ i ];
-                std::string inode_device_str = string_format( "%lu [%u:%u]",
-                    watch_info.inode, major( watch_info.dev ), minor( watch_info.dev ) );
+                dev_t dev = it1.first;
 
-                printf( " %s%s%s ", BGRAY, inode_device_str.c_str(), RESET );
+                printf( "%s[%u.%u]:%s", BGRAY, major( dev ), minor( dev ), RESET );
+                for ( const auto &it2 : it1.second )
+                {
+                    std::string inode_device_str = string_format( "%lu", it2 );
 
-                inode_set[ watch_info.inode ].insert( watch_info.dev );
-
-                if ( !( ++count % 5 ) )
-                    printf( "\n     " );
+                    printf( " %s%s%s", BGRAY, inode_device_str.c_str(), RESET );
+                }
+                printf( "\n" );
             }
-            printf( "\n" );
         }
-
-        total_watches += procinfo.watches;
-        total_instances += procinfo.instances;
     }
-
-    print_separator();
-
-    printf( "Total inotify Watches:   %s%u%s\n", BGREEN, total_watches, RESET );
-    printf( "Total inotify Instances: %s%u%s\n", BGREEN, total_instances, RESET );
 }
 
-bool inotifyapp_t::find_files_in_inode_set()
+static void *parse_dirqueue_threadproc( void *arg )
 {
-    double t0 = gettime();
+    thread_info_t *pthread_info = ( thread_info_t * )arg;
 
-    assert( all_found_files.empty() );
+    for ( ;; )
+    {
+        // Loop until all the dequeue(s) fail
+        if ( pthread_info->parse_dirqueue_entry() == -1 )
+            break;
+    }
+
+    return nullptr;
+}
+
+static uint32_t find_files_in_inode_set( std::vector< procinfo_t > &inotify_proclist, std::vector< filename_info_t > &all_found_files )
+{
+    // Map of all inotify inodes watched to the set of devices they are on
+    inode_set_t inode_set;
+    // Array of threads. Index 0 is main thread.
+    thread_info_array_t thread_infos;
+
+    for ( procinfo_t &procinfo : inotify_proclist )
+    {
+        if ( !procinfo.in_cmd_line  )
+            continue;
+
+        for ( const auto &it1 : procinfo.dev_map )
+        {
+            dev_t dev = it1.first;
+            for ( const auto &inode : it1.second )
+            {
+                inode_set[ inode ].insert( dev );
+            }
+        }
+    }
 
     if ( inode_set.empty() )
-        return false;
+        return 0;
 
     g_numthreads = std::max< size_t >( 1, g_numthreads );
     thread_infos.resize( g_numthreads );
@@ -725,7 +661,7 @@ bool inotifyapp_t::find_files_in_inode_set()
     printf( "\n%sSearching '/' for listed inodes...%s (%lu threads)\n", BCYAN, RESET, g_numthreads );
 
     // Init main thread
-    thread_infos[ 0 ].init( 0, this );
+    thread_infos[ 0 ].init( 0, thread_infos, inode_set );
 
     // Add root dir in case someone is watching it
     // Parse root to add some dirs for threads to chew on
@@ -735,16 +671,16 @@ bool inotifyapp_t::find_files_in_inode_set()
 
     for ( size_t i = 1; i < g_numthreads; i++ )
     {
-        thread_infos[ i ].init( i, this );
+        thread_infos[ i ].init( i, thread_infos, inode_set );
 
-        if ( pthread_create( &thread_infos[ i ].pthread_id, NULL, &inotifyapp_t::parse_dirqueue_threadproc, &thread_infos[ i ] ) )
+        if ( pthread_create( &thread_infos[ i ].pthread_id, NULL, &parse_dirqueue_threadproc, &thread_infos[ i ] ) )
         {
             thread_infos[ i ].pthread_id = 0;
         }
     }
 
     // Put main thread to work
-    inotifyapp_t::parse_dirqueue_threadproc( &thread_infos[ 0 ] );
+    parse_dirqueue_threadproc( &thread_infos[ 0 ] );
 
     for ( const thread_info_t &thread_info : thread_infos )
     {
@@ -766,53 +702,34 @@ bool inotifyapp_t::find_files_in_inode_set()
     }
 
     // Coalesce data from all our threads
+    uint32_t total_scanned_dirs = 0;
     for ( const thread_info_t &thread_info : thread_infos )
     {
         total_scanned_dirs += thread_info.scanned_dirs;
 
         all_found_files.insert( all_found_files.end(),
-            thread_info.found_files.begin(), thread_info.found_files.end() );
+                thread_info.found_files.begin(), thread_info.found_files.end() );
 
         if ( g_verbose > 1 )
         {
             printf( "Thread #%u: %u dirs, %zu files found\n",
-                thread_info.num, thread_info.scanned_dirs, thread_info.found_files.size() );
+                    thread_info.num, thread_info.scanned_dirs, thread_info.found_files.size() );
         }
     }
 
-    search_time = gettime() - t0;
-    return true;
-}
-
-void inotifyapp_t::print_found_files()
-{
-    if ( !all_found_files.empty() )
+    struct
     {
-        struct
+        bool operator()( const filename_info_t &a, const filename_info_t &b ) const
         {
-            bool operator()( const filename_info_t &a, const filename_info_t &b ) const
-            {
-                if ( a.dev == b.dev )
-                    return a.inode < b.inode;
-                return a.dev < b.dev;
-            }
-        } filename_info_less_func;
-
-        std::sort( all_found_files.begin(), all_found_files.end(), filename_info_less_func );
-
-        for ( const filename_info_t &fname_info : all_found_files )
-        {
-            printf( "%s%9lu%s [%u:%u] %s\n", BGREEN, fname_info.inode, RESET,
-                major( fname_info.dev ), minor( fname_info.dev ),
-                fname_info.filename.c_str() );
+            if ( a.dev == b.dev )
+                return a.inode < b.inode;
+            return a.dev < b.dev;
         }
-    }
+    } filename_info_less_func;
 
-    if ( total_scanned_dirs )
-    {
-        setlocale( LC_NUMERIC, "" );
-        printf( "\n%'u dirs scanned (%.2f seconds)\n", total_scanned_dirs, search_time );
-    }
+    std::sort( all_found_files.begin(), all_found_files.end(), filename_info_less_func );
+
+    return total_scanned_dirs;
 }
 
 static uint32_t get_inotify_procfs_value( const char *basename )
@@ -847,28 +764,53 @@ static void print_inotify_limits()
 
 int main( int argc, char *argv[] )
 {
-    inotifyapp_t app;
+    std::vector< std::string > cmdline_applist;
+    std::vector< procinfo_t > inotify_proclist;
 
-    app.init( argc, argv );
-
+    parse_cmdline( argc, argv, cmdline_applist );
     print_separator();
 
     print_inotify_limits();
-
     print_separator();
 
-    if ( app.init_inotify_proclist() )
+    if ( init_inotify_proclist( inotify_proclist ) )
     {
-        app.print_inotify_proclist();
+        uint32_t total_watches = 0;
+        uint32_t total_instances = 0;
+        std::vector< filename_info_t > all_found_files;
 
+        for ( procinfo_t &procinfo : inotify_proclist )
+        {
+            procinfo.in_cmd_line = is_proc_in_cmdline_applist( procinfo, cmdline_applist );
+
+            total_watches += procinfo.watches;
+            total_instances += procinfo.instances;
+        }
+
+        print_inotify_proclist( inotify_proclist );
         print_separator();
 
-        if ( app.find_files_in_inode_set() )
+        printf( "Total inotify Watches:   %s%u%s\n", BGREEN, total_watches, RESET );
+        printf( "Total inotify Instances: %s%u%s\n", BGREEN, total_instances, RESET );
+        print_separator();
+
+        double search_time = gettime();
+        uint32_t total_scanned_dirs = find_files_in_inode_set( inotify_proclist, all_found_files );
+        if ( total_scanned_dirs )
         {
-            app.print_found_files();
+            search_time = gettime() - search_time;
+
+            for ( const filename_info_t &fname_info : all_found_files )
+            {
+                printf( "%s%9lu%s [%u:%u] %s\n", BGREEN, fname_info.inode, RESET,
+                        major( fname_info.dev ), minor( fname_info.dev ),
+                        fname_info.filename.c_str() );
+            }
+
+            setlocale( LC_NUMERIC, "" );
+            printf( "\n%'u dirs scanned (%.2f seconds)\n", total_scanned_dirs, search_time );
         }
     }
 
-    app.shutdown();
     return 0;
 }
