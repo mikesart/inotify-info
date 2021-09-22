@@ -94,18 +94,31 @@ struct procinfo_t
 };
 
 /*
+ * shared thread data
+ */
+class thread_shared_data_t
+{
+public:
+    thread_shared_data_t() {}
+    ~thread_shared_data_t();
+
+    bool init( uint32_t numthreads, const std::vector< procinfo_t > &inotify_proclist );
+
+public:
+    // Array of queues - one per thread
+    std::vector< lfqueue_t > dirqueues;
+    // Map of all inotify inodes watched to the set of devices they are on
+    std::unordered_map< ino64_t, std::unordered_set< dev_t > > inode_set;
+};
+
+/*
  * thread info
  */
-typedef std::unordered_map< ino64_t, std::unordered_set< dev_t > > inode_set_t;
-typedef std::vector< class thread_info_t > thread_info_array_t;
-
 class thread_info_t
 {
 public:
-    thread_info_t();
-    ~thread_info_t();
-
-    void init( thread_info_array_t &thread_infos, inode_set_t &inode_set );
+    thread_info_t( thread_shared_data_t &tdata_in ) : tdata( tdata_in ) {}
+    ~thread_info_t() {}
 
     void queue_directory( char *path );
     char *dequeue_directory();
@@ -116,17 +129,13 @@ public:
     void add_filename( ino64_t inode, const char *path, const char *d_name, bool is_dir );
 
 public:
+    uint32_t idx = 0;
     pthread_t pthread_id = 0;
-    uint32_t scanned_dirs = 0;  // Total dirs scanned by this thread
 
-    lfqueue_t dirqueue;
+    thread_shared_data_t &tdata;
 
-    // Array of threads. Index 0 is main thread.
-    thread_info_array_t *pthread_infos = nullptr;
-
-    // Map of all inotify inodes watched to the set of devices they are on
-    const inode_set_t *pinode_set = nullptr;
-
+    // Total dirs scanned by this thread
+    uint32_t scanned_dirs = 0;
     // Files found by this thread
     std::vector< filename_info_t > found_files;
 };
@@ -295,87 +304,21 @@ static void inotify_parse_fddir( procinfo_t &procinfo )
     closedir( dir_fd );
 }
 
-static void print_usage( const char *appname )
-{
-    printf( "Usage: %s [--threads=##] [appname | pid...]\n", appname );
-    printf( "    [-vv]\n" );
-    printf( "    [-?|-h|--help]\n" );
-
-    exit( -1 );
-}
-
-static void parse_cmdline( int argc, char **argv, std::vector< std::string > &cmdline_applist )
-{
-    static struct option long_opts[] =
-    {
-        { "verbose", no_argument, 0, 0 },
-        { "threads", required_argument, 0, 0 },
-        { 0, 0, 0, 0 }
-    };
-
-    // Let's pick the number of processors online (with a max of 32) for a default.
-    g_numthreads = std::min< uint32_t >( g_numthreads, sysconf( _SC_NPROCESSORS_ONLN ) );
-
-    int c;
-    int opt_ind = 0;
-    while ( ( c = getopt_long( argc, argv, "m:s:?hv", long_opts, &opt_ind ) ) != -1 )
-    {
-        switch ( c )
-        {
-        case 0:
-            if ( !strcasecmp( "verbose", long_opts[ opt_ind ].name ) )
-                g_verbose++;
-            else if ( !strcasecmp( "threads", long_opts[ opt_ind ].name ) )
-                g_numthreads = atoi( optarg );
-            break;
-        case 'v':
-            g_verbose++;
-            break;
-        case 'h':
-        case '?':
-        default:
-            print_usage( argv[ 0 ] );
-            break;
-        }
-    }
-
-    for ( ; optind < argc; optind++ )
-    {
-        cmdline_applist.push_back( argv[ optind ] );
-    }
-}
-
-thread_info_t::thread_info_t()
-{
-    lfqueue_init( &dirqueue );
-}
-
-thread_info_t::~thread_info_t()
-{
-    lfqueue_destroy( &dirqueue );
-}
-
-void thread_info_t::init( thread_info_array_t &thread_infos, inode_set_t &inode_set  )
-{
-    pthread_infos = &thread_infos;
-    pinode_set = &inode_set;
-}
-
 void thread_info_t::queue_directory( char *path )
 {
-    lfqueue_enq( &dirqueue, path );
+    lfqueue_enq( &tdata.dirqueues[ idx ], path );
 }
 
 char *thread_info_t::dequeue_directory()
 {
-    char *path = ( char * )lfqueue_deq( &dirqueue );
+    char *path = ( char * )lfqueue_deq( &tdata.dirqueues[ idx ] );
 
     if ( !path )
     {
         // Nothing on our queue, check queues on other threads
-        for ( thread_info_t &thread_info : *pthread_infos )
+        for ( lfqueue_t &dirq : tdata.dirqueues )
         {
-            path = ( char * )lfqueue_deq( &thread_info.dirqueue );
+            path = ( char * )lfqueue_deq( &dirq );
             if ( path )
                 break;
         }
@@ -400,9 +343,9 @@ struct statx mystatx( const char *filename, unsigned int mask = 0 )
 
 void thread_info_t::add_filename( ino64_t inode, const char *path, const char *d_name, bool is_dir )
 {
-    auto it = pinode_set->find( inode );
+    auto it = tdata.inode_set.find( inode );
 
-    if ( it != pinode_set->end() )
+    if ( it != tdata.inode_set.end() )
     {
         const std::unordered_set< dev_t > &dev_set = it->second;
 
@@ -519,6 +462,20 @@ int thread_info_t::parse_dirqueue_entry()
     return 1;
 }
 
+static void *parse_dirqueue_threadproc( void *arg )
+{
+    thread_info_t *pthread_info = ( thread_info_t * )arg;
+
+    for ( ;; )
+    {
+        // Loop until all the dequeue(s) fail
+        if ( pthread_info->parse_dirqueue_entry() == -1 )
+            break;
+    }
+
+    return nullptr;
+}
+
 static bool is_proc_in_cmdline_applist( const procinfo_t &procinfo, std::vector< std::string > &cmdline_applist )
 {
     for ( const std::string &str : cmdline_applist )
@@ -615,28 +572,8 @@ static void print_inotify_proclist( std::vector< procinfo_t > &inotify_proclist 
     }
 }
 
-static void *parse_dirqueue_threadproc( void *arg )
+bool thread_shared_data_t::init( uint32_t numthreads, const std::vector< procinfo_t > &inotify_proclist )
 {
-    thread_info_t *pthread_info = ( thread_info_t * )arg;
-
-    for ( ;; )
-    {
-        // Loop until all the dequeue(s) fail
-        if ( pthread_info->parse_dirqueue_entry() == -1 )
-            break;
-    }
-
-    return nullptr;
-}
-
-static uint32_t find_files_in_inode_set( const std::vector< procinfo_t > &inotify_proclist,
-    std::vector< filename_info_t > &all_found_files )
-{
-    // Map of all inotify inodes watched to the set of devices they are on
-    inode_set_t inode_set;
-    // Array of threads. Index 0 is main thread.
-    thread_info_array_t thread_infos;
-
     for ( const procinfo_t &procinfo : inotify_proclist )
     {
         if ( !procinfo.in_cmd_line  )
@@ -645,6 +582,7 @@ static uint32_t find_files_in_inode_set( const std::vector< procinfo_t > &inotif
         for ( const auto &it1 : procinfo.dev_map )
         {
             dev_t dev = it1.first;
+
             for ( const auto &inode : it1.second )
             {
                 inode_set[ inode ].insert( dev );
@@ -652,45 +590,78 @@ static uint32_t find_files_in_inode_set( const std::vector< procinfo_t > &inotif
         }
     }
 
-    if ( inode_set.empty() )
-        return 0;
+    if ( !inode_set.empty() )
+    {
+        dirqueues.resize( g_numthreads );
+
+        for ( lfqueue_t &dirq : dirqueues )
+        {
+            lfqueue_init( &dirq );
+        }
+    }
+
+    return !inode_set.empty();
+}
+
+thread_shared_data_t::~thread_shared_data_t()
+{
+    for ( lfqueue_t &dirq : dirqueues )
+    {
+        lfqueue_destroy( &dirq );
+    }
+
+    dirqueues.clear();
+}
+
+static uint32_t find_files_in_inode_set( const std::vector< procinfo_t > &inotify_proclist,
+    std::vector< filename_info_t > &all_found_files )
+{
+    thread_shared_data_t tdata;
 
     g_numthreads = std::max< size_t >( 1, g_numthreads );
-    thread_infos.resize( g_numthreads );
+
+    if ( !tdata.init( g_numthreads, inotify_proclist ) )
+        return 0;
 
     printf( "\n%sSearching '/' for listed inodes...%s (%lu threads)\n", BCYAN, RESET, g_numthreads );
 
-    // Init main thread
-    thread_infos[ 0 ].init( thread_infos, inode_set );
+    // Initialize thread_info_t array
+    std::vector< class thread_info_t > thread_array( g_numthreads, thread_info_t( tdata ) );
 
-    // Add root dir in case someone is watching it
-    // Parse root to add some dirs for threads to chew on
-    thread_infos[ 0 ].add_filename( mystatx( "/", STATX_INO ).stx_ino, "/", "", false );
-    thread_infos[ 0 ].queue_directory( strdup( "/" ) );
-    thread_infos[ 0 ].parse_dirqueue_entry();
-
-    for ( size_t i = 1; i < g_numthreads; i++ )
+    for ( uint32_t idx = 0; idx < thread_array.size(); idx++ )
     {
-        thread_infos[ i ].init( thread_infos, inode_set );
+        thread_info_t &thread_info = thread_array[ idx ];
 
-        if ( pthread_create( &thread_infos[ i ].pthread_id, NULL, &parse_dirqueue_threadproc, &thread_infos[ i ] ) )
+        thread_info.idx = idx;
+
+        if ( idx == 0 )
         {
-            thread_infos[ i ].pthread_id = 0;
+            // Add root dir in case someone is watching it
+            thread_info.add_filename( mystatx( "/", STATX_INO ).stx_ino, "/", "", false );
+            // Add and parse root
+            thread_info.queue_directory( strdup( "/" ) );
+            thread_info.parse_dirqueue_entry();
+        }
+        else if ( pthread_create( &thread_info.pthread_id, NULL, &parse_dirqueue_threadproc, &thread_info ) )
+        {
+            printf( "Warning: pthread_create failed. errno: %d\n", errno );
+            thread_info.pthread_id = 0;
         }
     }
 
     // Put main thread to work
-    parse_dirqueue_threadproc( &thread_infos[ 0 ] );
+    parse_dirqueue_threadproc( &thread_array[ 0 ] );
 
-    for ( const thread_info_t &thread_info : thread_infos )
+    uint32_t total_scanned_dirs = 0;
+    for ( const thread_info_t &thread_info : thread_array )
     {
-        if ( g_verbose > 1 )
-        {
-            printf( "Waiting for thread #%zu\n", thread_info.pthread_id );
-        }
-
         if ( thread_info.pthread_id )
         {
+            if ( g_verbose > 1 )
+            {
+                printf( "Waiting for thread #%zu\n", thread_info.pthread_id );
+            }
+
             void *status = NULL;
             int rc = pthread_join( thread_info.pthread_id, &status );
 
@@ -699,12 +670,8 @@ static uint32_t find_files_in_inode_set( const std::vector< procinfo_t > &inotif
                 printf( "Thread #%zu rc=%d status=%d\n", thread_info.pthread_id, rc, ( int )( intptr_t )status );
             }
         }
-    }
 
-    // Coalesce data from all our threads
-    uint32_t total_scanned_dirs = 0;
-    for ( const thread_info_t &thread_info : thread_infos )
-    {
+        // Snag data from this thread
         total_scanned_dirs += thread_info.scanned_dirs;
 
         all_found_files.insert( all_found_files.end(),
@@ -760,6 +727,56 @@ static void print_inotify_limits()
     printf( "  max_queued_events:  %s%u%s\n", BGREEN, max_queued_events, RESET );
     printf( "  max_user_instances: %s%u%s\n", BGREEN, max_user_instances, RESET );
     printf( "  max_user_watches:   %s%u%s\n", BGREEN, max_user_watches, RESET );
+}
+
+static void print_usage( const char *appname )
+{
+    printf( "Usage: %s [--threads=##] [appname | pid...]\n", appname );
+    printf( "    [-vv]\n" );
+    printf( "    [-?|-h|--help]\n" );
+
+    exit( -1 );
+}
+
+static void parse_cmdline( int argc, char **argv, std::vector< std::string > &cmdline_applist )
+{
+    static struct option long_opts[] =
+    {
+        { "verbose", no_argument, 0, 0 },
+        { "threads", required_argument, 0, 0 },
+        { 0, 0, 0, 0 }
+    };
+
+    // Let's pick the number of processors online (with a max of 32) for a default.
+    g_numthreads = std::min< uint32_t >( g_numthreads, sysconf( _SC_NPROCESSORS_ONLN ) );
+
+    int c;
+    int opt_ind = 0;
+    while ( ( c = getopt_long( argc, argv, "m:s:?hv", long_opts, &opt_ind ) ) != -1 )
+    {
+        switch ( c )
+        {
+        case 0:
+            if ( !strcasecmp( "verbose", long_opts[ opt_ind ].name ) )
+                g_verbose++;
+            else if ( !strcasecmp( "threads", long_opts[ opt_ind ].name ) )
+                g_numthreads = atoi( optarg );
+            break;
+        case 'v':
+            g_verbose++;
+            break;
+        case 'h':
+        case '?':
+        default:
+            print_usage( argv[ 0 ] );
+            break;
+        }
+    }
+
+    for ( ; optind < argc; optind++ )
+    {
+        cmdline_applist.push_back( argv[ optind ] );
+    }
 }
 
 int main( int argc, char *argv[] )
