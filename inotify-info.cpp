@@ -105,7 +105,7 @@ public:
     thread_info_t();
     ~thread_info_t();
 
-    void init( size_t thread_id, thread_info_array_t &thread_infos, inode_set_t &inode_set );
+    void init( thread_info_array_t &thread_infos, inode_set_t &inode_set );
 
     void queue_directory( char *path );
     char *dequeue_directory();
@@ -116,7 +116,6 @@ public:
     void add_filename( ino64_t inode, const char *path, const char *d_name, bool is_dir );
 
 public:
-    uint32_t num = 0;           // Thread number (0 for main thread)
     pthread_t pthread_id = 0;
     uint32_t scanned_dirs = 0;  // Total dirs scanned by this thread
 
@@ -356,10 +355,8 @@ thread_info_t::~thread_info_t()
     lfqueue_destroy( &dirqueue );
 }
 
-void thread_info_t::init( size_t thread_num, thread_info_array_t &thread_infos, inode_set_t &inode_set  )
+void thread_info_t::init( thread_info_array_t &thread_infos, inode_set_t &inode_set  )
 {
-    num = thread_num;
-
     pthread_infos = &thread_infos;
     pinode_set = &inode_set;
 }
@@ -587,7 +584,9 @@ static void print_inotify_proclist( std::vector< procinfo_t > &inotify_proclist 
 
     for ( procinfo_t &procinfo : inotify_proclist )
     {
-        printf( "  % 7d %s%-30s%s %3u %3u\n", procinfo.pid, BYELLOW, procinfo.appname.c_str(), RESET, procinfo.watches, procinfo.instances );
+        printf( "  % 7d %s%-30s%s %3u %3u\n", procinfo.pid,
+            BYELLOW, procinfo.appname.c_str(), RESET,
+            procinfo.watches, procinfo.instances );
 
         if ( g_verbose > 1 )
         {
@@ -630,14 +629,15 @@ static void *parse_dirqueue_threadproc( void *arg )
     return nullptr;
 }
 
-static uint32_t find_files_in_inode_set( std::vector< procinfo_t > &inotify_proclist, std::vector< filename_info_t > &all_found_files )
+static uint32_t find_files_in_inode_set( const std::vector< procinfo_t > &inotify_proclist,
+    std::vector< filename_info_t > &all_found_files )
 {
     // Map of all inotify inodes watched to the set of devices they are on
     inode_set_t inode_set;
     // Array of threads. Index 0 is main thread.
     thread_info_array_t thread_infos;
 
-    for ( procinfo_t &procinfo : inotify_proclist )
+    for ( const procinfo_t &procinfo : inotify_proclist )
     {
         if ( !procinfo.in_cmd_line  )
             continue;
@@ -661,7 +661,7 @@ static uint32_t find_files_in_inode_set( std::vector< procinfo_t > &inotify_proc
     printf( "\n%sSearching '/' for listed inodes...%s (%lu threads)\n", BCYAN, RESET, g_numthreads );
 
     // Init main thread
-    thread_infos[ 0 ].init( 0, thread_infos, inode_set );
+    thread_infos[ 0 ].init( thread_infos, inode_set );
 
     // Add root dir in case someone is watching it
     // Parse root to add some dirs for threads to chew on
@@ -671,7 +671,7 @@ static uint32_t find_files_in_inode_set( std::vector< procinfo_t > &inotify_proc
 
     for ( size_t i = 1; i < g_numthreads; i++ )
     {
-        thread_infos[ i ].init( i, thread_infos, inode_set );
+        thread_infos[ i ].init( thread_infos, inode_set );
 
         if ( pthread_create( &thread_infos[ i ].pthread_id, NULL, &parse_dirqueue_threadproc, &thread_infos[ i ] ) )
         {
@@ -686,7 +686,7 @@ static uint32_t find_files_in_inode_set( std::vector< procinfo_t > &inotify_proc
     {
         if ( g_verbose > 1 )
         {
-            printf( "Waiting for thread #%u\n", thread_info.num );
+            printf( "Waiting for thread #%zu\n", thread_info.pthread_id );
         }
 
         if ( thread_info.pthread_id )
@@ -696,7 +696,7 @@ static uint32_t find_files_in_inode_set( std::vector< procinfo_t > &inotify_proc
 
             if ( g_verbose > 1 )
             {
-                printf( "Thread #%u rc=%d status=%d\n", thread_info.num, rc, ( int )( intptr_t )status );
+                printf( "Thread #%zu rc=%d status=%d\n", thread_info.pthread_id, rc, ( int )( intptr_t )status );
             }
         }
     }
@@ -712,8 +712,8 @@ static uint32_t find_files_in_inode_set( std::vector< procinfo_t > &inotify_proc
 
         if ( g_verbose > 1 )
         {
-            printf( "Thread #%u: %u dirs, %zu files found\n",
-                    thread_info.num, thread_info.scanned_dirs, thread_info.found_files.size() );
+            printf( "Thread #%zu: %u dirs, %zu files found\n",
+                    thread_info.pthread_id, thread_info.scanned_dirs, thread_info.found_files.size() );
         }
     }
 
