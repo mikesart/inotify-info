@@ -36,7 +36,6 @@
 #include <unistd.h>
 #include <sys/sysmacros.h>
 
-#include <atomic>
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -143,6 +142,7 @@ public:
 /*
  * getdents64 syscall
  */
+GCC_DIAG_PUSH_OFF( pedantic )
 struct linux_dirent64
 {
     uint64_t d_ino;          // Inode number
@@ -151,6 +151,7 @@ struct linux_dirent64
     unsigned char d_type;    // File type
     char d_name[];           // Filename (null-terminated)
 };
+GCC_DIAG_POP()
 
 int sys_getdents64( int fd, char *dirp, int count )
 {
@@ -163,11 +164,6 @@ static double gettime()
 
     clock_gettime( CLOCK_MONOTONIC, &ts );
     return ( double )ts.tv_sec + ( double )ts.tv_nsec / 1e9;
-}
-
-void print_separator()
-{
-    printf( "%s%s%s\n", YELLOW, std::string( 78, '-' ).c_str(), RESET );
 }
 
 std::string string_formatv( const char *fmt, va_list ap )
@@ -202,26 +198,25 @@ std::string string_format( const char *fmt, ... )
     return str;
 }
 
-static std::string get_link_name( const char *Pathname )
+static std::string get_link_name( const char *pathname )
 {
     std::string Result;
-    char Filename[ PATH_MAX + 1 ];
+    char filename[ PATH_MAX + 1 ];
 
-    ssize_t ret = readlink( Pathname, Filename, sizeof( Filename ) );
-    if ( ( ret > 0 ) && ( ret < ( ssize_t )sizeof( Filename ) ) )
+    ssize_t ret = readlink( pathname, filename, sizeof( filename ) );
+    if ( ( ret > 0 ) && ( ret < ( ssize_t )sizeof( filename ) ) )
     {
-        Filename[ ret ] = 0;
-        Result = Filename;
+        filename[ ret ] = 0;
+        Result = filename;
     }
     return Result;
 }
 
 static uint64_t get_token_val( const char *line, const char *token )
 {
-    char *endptr;
     const char *str = strstr( line, token );
 
-    return str ? strtoull( str + strlen( token ), &endptr, 16 ) : 0;
+    return str ? strtoull( str + strlen( token ), nullptr, 16 ) : 0;
 }
 
 static uint32_t inotify_parse_fdinfo_file( procinfo_t &procinfo, const char *fdset_name )
@@ -592,7 +587,7 @@ bool thread_shared_data_t::init( uint32_t numthreads, const std::vector< procinf
 
     if ( !inode_set.empty() )
     {
-        dirqueues.resize( g_numthreads );
+        dirqueues.resize( numthreads );
 
         for ( lfqueue_t &dirq : dirqueues )
         {
@@ -699,34 +694,42 @@ static uint32_t find_files_in_inode_set( const std::vector< procinfo_t > &inotif
     return total_scanned_dirs;
 }
 
-static uint32_t get_inotify_procfs_value( const char *basename )
+static uint32_t get_inotify_procfs_value( const std::string &fname )
 {
-    uint32_t interface_val = 0;
-    std::string Filename = string_format( "/proc/sys/fs/inotify/%s", basename );
+    char buf[ 64 ];
+    uint32_t val = 0;
+    std::string filename = "/proc/sys/fs/inotify/" + fname;
 
-    FILE *fp = fopen( Filename.c_str(), "r" );
-    if ( fp )
+    int fd = open( filename.c_str(), O_RDONLY );
+    if ( fd >= 0 )
     {
-        if ( fscanf( fp, "%u", &interface_val ) != 1 )
+        if ( read( fd, buf, sizeof( buf ) ) > 0 )
         {
-            interface_val = 0;
+            val = strtoul( buf, nullptr, 10 );
         }
-        fclose( fp );
+
+        close( fd );
     }
 
-    return interface_val;
+    return val;
 }
 
 static void print_inotify_limits()
 {
-    uint32_t max_queued_events = get_inotify_procfs_value( "max_queued_events" );
-    uint32_t max_user_instances = get_inotify_procfs_value( "max_user_instances" );
-    uint32_t max_user_watches = get_inotify_procfs_value( "max_user_watches" );
+    const std::vector< std::string > filenames =
+    {
+        "max_queued_events",
+        "max_user_instances",
+        "max_user_watches"
+    };
 
     printf( "%sINotify Limits:%s\n", BCYAN, RESET );
-    printf( "  max_queued_events:  %s%u%s\n", BGREEN, max_queued_events, RESET );
-    printf( "  max_user_instances: %s%u%s\n", BGREEN, max_user_instances, RESET );
-    printf( "  max_user_watches:   %s%u%s\n", BGREEN, max_user_watches, RESET );
+    for ( const std::string &fname : filenames )
+    {
+        uint32_t val = get_inotify_procfs_value( fname );
+
+        printf( "  %-20s %s%u%s\n", fname.c_str(), BGREEN, val, RESET );
+    }
 }
 
 static void print_usage( const char *appname )
@@ -779,6 +782,11 @@ static void parse_cmdline( int argc, char **argv, std::vector< std::string > &cm
     }
 }
 
+static void print_separator()
+{
+    printf( "%s%s%s\n", YELLOW, std::string( 78, '-' ).c_str(), RESET );
+}
+
 int main( int argc, char *argv[] )
 {
     std::vector< std::string > cmdline_applist;
@@ -825,7 +833,9 @@ int main( int argc, char *argv[] )
             }
 
             setlocale( LC_NUMERIC, "" );
+GCC_DIAG_PUSH_OFF( format )
             printf( "\n%'u dirs scanned (%.2f seconds)\n", total_scanned_dirs, search_time );
+GCC_DIAG_POP()
         }
     }
 

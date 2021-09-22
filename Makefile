@@ -27,18 +27,15 @@ VERBOSE ?= 0
 
 COMPILER = $(shell $(CC) -v 2>&1 | grep -q "clang version" && echo clang || echo gcc)
 
-WARNINGS = -Wall -Wextra -Wpedantic -Wmissing-include-dirs -Wformat=2 -Wshadow -Wno-unused-parameter -Wno-missing-field-initializers
+WARNINGS = -Wall -Wextra -Wpedantic -Wmissing-include-dirs -Wformat=2 -Wshadow
 ifneq ($(COMPILER),clang)
   # https://gcc.gnu.org/onlinedocs/gcc/Warning-Options.html
   WARNINGS += -Wsuggest-attribute=format -Wimplicit-fallthrough=2
 endif
 
-# Investigate: Improving C++ Builds with Split DWARF
-#  http://www.productive-cpp.com/improving-cpp-builds-with-split-dwarf/
-
 CFLAGS = $(WARNINGS) -march=native -fno-exceptions -gdwarf-4 -g2 -ggnu-pubnames -gsplit-dwarf
 CFLAGS += -D_LARGEFILE64_SOURCE=1 -D_FILE_OFFSET_BITS=64
-CXXFLAGS = -fno-rtti -Woverloaded-virtual -Wno-class-memaccess -Wno-pedantic
+CXXFLAGS = -fno-rtti -Woverloaded-virtual
 LDFLAGS = -march=native -gdwarf-4 -g2 -Wl,--build-id=sha1
 LIBS = -Wl,--no-as-needed -lm -ldl -lpthread -lstdc++
 
@@ -57,7 +54,6 @@ CFILES = \
 ifeq ($(ASAN), 1)
 	# https://gcc.gnu.org/gcc-5/changes.html
 	#  -fsanitize=float-cast-overflow: check that the result of floating-point type to integer conversions do not overflow;
-	#  -fsanitize=alignment: enable alignment checking, detect various misaligned objects;
 	#  -fsanitize=vptr: enable checking of C++ member function calls, member accesses and some conversions between pointers to base and derived classes, detect if the referenced object does not have the correct dynamic type.
 	ASAN_FLAGS = -fno-omit-frame-pointer -fno-optimize-sibling-calls
 	ASAN_FLAGS += -fsanitize=address # fast memory error detector (heap, stack, global buffer overflow, and use-after free)
@@ -66,6 +62,7 @@ ifeq ($(ASAN), 1)
 	ASAN_FLAGS += -fsanitize=float-divide-by-zero # detect floating-point division by zero;
 	ASAN_FLAGS += -fsanitize=bounds # enable instrumentation of array bounds and detect out-of-bounds accesses;
 	ASAN_FLAGS += -fsanitize=object-size # enable object size checking, detect various out-of-bounds accesses.
+	ASAN_FLAGS += -fsanitize=alignment # enable alignment checking, detect various misaligned objects;
 	CFLAGS += $(ASAN_FLAGS)
 	LDFLAGS += $(ASAN_FLAGS)
 endif

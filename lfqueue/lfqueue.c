@@ -107,10 +107,10 @@ static void __lfq_check_free(lfqueue_t *);
 static void *_dequeue(lfqueue_t *);
 static void *_single_dequeue(lfqueue_t *);
 static int _enqueue(lfqueue_t *, void* );
-static inline void* _lfqueue_malloc(void* pl, size_t sz) {
+static inline void* _lfqueue_malloc(__attribute__ ((unused)) void* pl, size_t sz) {
 	return malloc(sz);
 }
-static inline void _lfqueue_free(void* pl, void* ptr) {
+static inline void _lfqueue_free(__attribute__ ((unused)) void* pl, void* ptr) {
 	free(ptr);
 }
 
