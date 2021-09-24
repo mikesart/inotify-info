@@ -36,6 +36,7 @@
 #include <unistd.h>
 #include <sys/sysmacros.h>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <algorithm>
@@ -49,7 +50,6 @@
  * TODO
  *  - Comments
  *  - Disable color
- *  - Check aarch64
  */
 
 static int g_verbose = 0;
@@ -92,20 +92,36 @@ struct procinfo_t
     std::unordered_map< dev_t, std::unordered_set< ino64_t > > dev_map;
 };
 
+class lfqueue_wrapper_t
+{
+public:
+    lfqueue_wrapper_t()                { lfqueue_init( &queue ); }
+    ~lfqueue_wrapper_t()               { lfqueue_destroy( &queue ); }
+
+    void queue_directory( char *path ) { lfqueue_enq( &queue, path ); }
+    char *dequeue_directory()          { return ( char * )lfqueue_deq( &queue ); }
+
+public:
+    typedef long long my_m256i __attribute__((__vector_size__(32), __aligned__(32)));
+
+    union
+    {
+        lfqueue_t queue;
+        my_m256i align_buf[4]; // Align to 128 bytes
+    };
+};
+
 /*
  * shared thread data
  */
 class thread_shared_data_t
 {
 public:
-    thread_shared_data_t() {}
-    ~thread_shared_data_t();
-
     bool init( uint32_t numthreads, const std::vector< procinfo_t > &inotify_proclist );
 
 public:
     // Array of queues - one per thread
-    std::vector< lfqueue_t > dirqueues;
+    std::vector< lfqueue_wrapper_t > dirqueues;
     // Map of all inotify inodes watched to the set of devices they are on
     std::unordered_map< ino64_t, std::unordered_set< dev_t > > inode_set;
 };
@@ -301,19 +317,19 @@ static void inotify_parse_fddir( procinfo_t &procinfo )
 
 void thread_info_t::queue_directory( char *path )
 {
-    lfqueue_enq( &tdata.dirqueues[ idx ], path );
+    tdata.dirqueues[ idx ].queue_directory( path );
 }
 
 char *thread_info_t::dequeue_directory()
 {
-    char *path = ( char * )lfqueue_deq( &tdata.dirqueues[ idx ] );
+    char *path = tdata.dirqueues[ idx ].dequeue_directory();
 
     if ( !path )
     {
         // Nothing on our queue, check queues on other threads
-        for ( lfqueue_t &dirq : tdata.dirqueues )
+        for ( lfqueue_wrapper_t &dirq : tdata.dirqueues )
         {
-            path = ( char * )lfqueue_deq( &dirq );
+            path = dirq.dequeue_directory();
             if ( path )
                 break;
         }
@@ -588,24 +604,9 @@ bool thread_shared_data_t::init( uint32_t numthreads, const std::vector< procinf
     if ( !inode_set.empty() )
     {
         dirqueues.resize( numthreads );
-
-        for ( lfqueue_t &dirq : dirqueues )
-        {
-            lfqueue_init( &dirq );
-        }
     }
 
     return !inode_set.empty();
-}
-
-thread_shared_data_t::~thread_shared_data_t()
-{
-    for ( lfqueue_t &dirq : dirqueues )
-    {
-        lfqueue_destroy( &dirq );
-    }
-
-    dirqueues.clear();
 }
 
 static uint32_t find_files_in_inode_set( const std::vector< procinfo_t > &inotify_proclist,
