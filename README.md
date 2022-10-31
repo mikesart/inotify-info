@@ -1,11 +1,7 @@
 # inotify-info
+> Easily track down the number of inotify watches, instances, and which files are being watched.
 
-The Linux inotify system has a few issues** and can be difficult to debug.
-
-This app should hopefully help track down how many inotify watches, instances, and what files are being watched.
-
-** https://code.visualstudio.com/docs/setup/linux#_visual-studio-code-is-unable-to-watch-for-file-changes-in-this-large-workspace-error-enospc  
-*** https://unix.stackexchange.com/questions/15509/whos-consuming-my-inotify-resources  
+The Linux inotify system has a few issues [1][problem1][2][problem2] and it can be difficult to debug when you for instance run out of watches. Using this app should hopefully aid you in tracking down how many inotify watches, instances, and what files are being watched.
 
 ## Screenshot
 ![Alt text](images/inotify-info.png?raw=true "inotify-info")
@@ -24,6 +20,12 @@ Building _debug/inotify-info...
 ---- inotify-info.cpp ----
 ---- lfqueue/lfqueue.c ----
 Linking _debug/inotify-info...
+```
+
+## Install
+You are free to copy the resulting executable to any suitable location in your `$PATH`.
+```
+cp _release/inotify-info /usr/local/bin/
 ```
 
 ## Run (Prints Summary)
@@ -154,4 +156,10 @@ Searching '/' for listed inodes... (8 threads)
 
 ## Credits
 
-lfqueue is [BSD-2-Clause License](https://github.com/Taymindis/lfqueue)
+[lfqueue][lfqueue] is [BSD-2-Clause License][bsd]
+
+
+[problem1]: https://code.visualstudio.com/docs/setup/linux#_visual-studio-code-is-unable-to-watch-for-file-changes-in-this-large-workspace-error-enospc  
+[problem2]: https://unix.stackexchange.com/questions/15509/whos-consuming-my-inotify-resources  
+[lfqueue]:  https://github.com/Taymindis/lfqueue
+[bsd]:      https://github.com/Taymindis/lfqueue/blob/master/LICENSE
