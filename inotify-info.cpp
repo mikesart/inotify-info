@@ -503,6 +503,12 @@ static bool is_proc_in_cmdline_applist( const procinfo_t &procinfo, std::vector<
     return false;
 }
 
+static bool watch_count_is_greater ( procinfo_t elem1, procinfo_t elem2 )
+{
+   return elem1.watches > elem2.watches;
+}
+
+
 static bool init_inotify_proclist( std::vector< procinfo_t > &inotify_proclist )
 {
     DIR *dir_proc = opendir( "/proc" );
@@ -541,6 +547,7 @@ static bool init_inotify_proclist( std::vector< procinfo_t > &inotify_proclist )
             }
         }
     }
+    std::sort(inotify_proclist.begin(), inotify_proclist.end(), watch_count_is_greater);
 
     closedir( dir_proc );
     return true;
