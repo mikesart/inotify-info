@@ -555,11 +555,11 @@ static bool init_inotify_proclist( std::vector< procinfo_t > &inotify_proclist )
 
 static void print_inotify_proclist( std::vector< procinfo_t > &inotify_proclist )
 {
-    printf( "%s     Pid  App                        Watches   Instances%s\n", BCYAN, RESET );
+    printf( "%s        Pid  App                        Watches   Instances%s\n", BCYAN, RESET );
 
     for ( procinfo_t &procinfo : inotify_proclist )
     {
-        printf( "  % 7d %s%-30s%s %3u %3u\n", procinfo.pid,
+        printf( "  % 10d %s%-30s%s %3u %3u\n", procinfo.pid,
             BYELLOW, procinfo.appname.c_str(), RESET,
             procinfo.watches, procinfo.instances );
 
