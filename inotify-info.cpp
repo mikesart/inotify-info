@@ -35,6 +35,7 @@
 #include <syscall.h>
 #include <unistd.h>
 #include <sys/sysmacros.h>
+#include <sys/statfs.h>
 
 #include <cstdint>
 #include <string>
@@ -392,6 +393,34 @@ static bool is_dot_dir( const char *dname )
     return false;
 }
 
+// From "linux/magic.h"
+#define PROC_SUPER_MAGIC    0x9fa0
+#define SMB_SUPER_MAGIC     0x517B
+#define CIFS_SUPER_MAGIC    0xFF534D42      /* the first four bytes of SMB PDUs */
+#define SMB2_SUPER_MAGIC    0xFE534D42
+#define FUSE_SUPER_MAGIC    0x65735546
+
+// Detect proc and fuse directories and skip them.
+//   https://github.com/mikesart/inotify-info/issues/6
+// Could use setmntent("/proc/mounts", "r") + getmntent if speed is an issue?
+static bool is_proc_dir( const char *path, const char *d_name )
+{
+    struct statfs s;
+    std::string filename = std::string( path ) + d_name;
+
+    if ( statfs(filename.c_str(), &s ) == 0 )
+    {
+        switch ( s.f_type )
+        {
+        case PROC_SUPER_MAGIC:
+        case FUSE_SUPER_MAGIC:
+            return true;
+        }
+    }
+
+    return false;
+}
+
 // Returns -1: queue empty, 0: open error, > 0 success
 int thread_info_t::parse_dirqueue_entry()
 {
@@ -445,7 +474,7 @@ int thread_info_t::parse_dirqueue_entry()
             // DT_DIR      This is a directory.
             else if ( dirp->d_type == DT_DIR )
             {
-                if ( !is_dot_dir( d_name ) )
+                if ( !is_dot_dir( d_name ) && !is_proc_dir( path, d_name ) )
                 {
                     add_filename( dirp->d_ino, path, d_name, true );
 
