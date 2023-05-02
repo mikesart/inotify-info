@@ -584,19 +584,24 @@ static bool init_inotify_proclist( std::vector< procinfo_t > &inotify_proclist )
 
 static void print_inotify_proclist( std::vector< procinfo_t > &inotify_proclist )
 {
-    unsigned int max_len = 0;
-    for ( procinfo_t &procinfo : inotify_proclist )
-            max_len = std::max( (unsigned int) procinfo.appname.length(), max_len);
-    const std::string header_padding = std::string(max_len-3 /* 'App' */, ' ');
+    int lenPid = 10;
+    int lenApp = 10;
+    int lenWatches = 8;
+    int lenInstances = 10;
 
-    printf( "%s        Pid  App%sWatches   Instances%s\n", BCYAN, header_padding.c_str(), RESET );
+    for ( procinfo_t &procinfo : inotify_proclist )
+        lenApp = std::max<int>( procinfo.appname.length(), lenApp );
+
+    printf( "%s%*s %-*s %*s %*s%s\n",
+        BCYAN, lenPid, "Pid", lenApp, "App", lenWatches, "Watches", lenInstances, "Instances", RESET);
 
     for ( procinfo_t &procinfo : inotify_proclist )
     {
-        std::string format = "  % 10d %s%-" + std::to_string(max_len) + "s%s %6u %3u\n";
-        printf( format.c_str(), procinfo.pid,
-            BYELLOW, procinfo.appname.c_str(), RESET,
-            procinfo.watches, procinfo.instances );
+        printf( "%*d %s%-*s%s %*u %*u\n",
+            lenPid, procinfo.pid,
+            BYELLOW, lenApp, procinfo.appname.c_str(), RESET,
+            lenWatches, procinfo.watches,
+            lenInstances, procinfo.instances );
 
         if ( g_verbose > 1 )
         {
