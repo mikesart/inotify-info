@@ -73,6 +73,9 @@ struct procinfo_t
 {
     pid_t pid = 0;
 
+    // uid
+    uid_t uid = 0;
+
     // Count of inotify watches and instances
     uint32_t watches = 0;
     uint32_t instances = 0;
@@ -227,6 +230,27 @@ static std::string get_link_name( const char *pathname )
         Result = filename;
     }
     return Result;
+}
+
+static uid_t get_uid(const char *pathname)
+{
+    FILE *fp = fopen( pathname, "r" );
+    char line_buf [ 256 ];
+    char uid[256];
+    while ( fgets( line_buf, sizeof( line_buf ), fp ) )
+    {
+        if ( !strncmp( line_buf, "Uid:", 4 ) ){
+            int j=0;
+            for(int i=4;;i++){
+                char v = line_buf[i];
+                if (v >='0' && v<='9')
+                    uid[j++]=v;
+                else if (j)
+                    return atoll(uid);
+            }
+        }
+    }
+    return -1;
 }
 
 static uint64_t get_token_val( const char *line, const char *token )
@@ -561,7 +585,8 @@ static bool init_inotify_proclist( std::vector< procinfo_t > &inotify_proclist )
             procinfo.pid = atoll( dp_proc->d_name );
 
             std::string executable = string_format( "/proc/%d/exe", procinfo.pid );
-
+            std::string status = string_format( "/proc/%d/status", procinfo.pid );
+            procinfo.uid = get_uid( status.c_str() );
             procinfo.executable = get_link_name( executable.c_str() );
             if ( !procinfo.executable.empty() )
             {
@@ -585,6 +610,7 @@ static bool init_inotify_proclist( std::vector< procinfo_t > &inotify_proclist )
 static void print_inotify_proclist( std::vector< procinfo_t > &inotify_proclist )
 {
     int lenPid = 10;
+    int lenUid = 10;
     int lenApp = 10;
     int lenWatches = 8;
     int lenInstances = 10;
@@ -592,13 +618,14 @@ static void print_inotify_proclist( std::vector< procinfo_t > &inotify_proclist 
     for ( procinfo_t &procinfo : inotify_proclist )
         lenApp = std::max<int>( procinfo.appname.length(), lenApp );
 
-    printf( "%s%*s %-*s %*s %*s%s\n",
-        BCYAN, lenPid, "Pid", lenApp, "App", lenWatches, "Watches", lenInstances, "Instances", RESET);
+    printf( "%s%*s %-*s %-*s %*s %*s%s\n",
+        BCYAN, lenPid, "Pid", lenUid, "Uid", lenApp, "App", lenWatches, "Watches", lenInstances, "Instances", RESET);
 
     for ( procinfo_t &procinfo : inotify_proclist )
     {
-        printf( "%*d %s%-*s%s %*u %*u\n",
+        printf( "%*d %-*d %s%-*s%s %*u %*u\n",
             lenPid, procinfo.pid,
+            lenUid, procinfo.uid,
             BYELLOW, lenApp, procinfo.appname.c_str(), RESET,
             lenWatches, procinfo.watches,
             lenInstances, procinfo.instances );
