@@ -477,9 +477,22 @@ int thread_info_t::parse_dirqueue_entry()
     for ( ;; )
     {
         int ret = sys_getdents64( fd, buf, sizeof( buf ) );
+
         if ( ret < 0 )
         {
-            printf( "ERROR: sys_getdents64 failed on '%s': %d errno:%d\n", path, ret, errno );
+            bool spew_error = true;
+
+            if ( ( errno == 5 ) && !strncmp( path, "/sys/kernel/", 12 ) )
+            {
+                // In docker container we can get permission denied errors in /sys/kernel. Ignore them.
+                // https://github.com/mikesart/inotify-info/issues/16
+                spew_error = false;
+            }
+
+            if ( spew_error )
+            {
+                printf( "ERROR: sys_getdents64 failed on '%s': %d errno:%d\n", path, ret, errno );
+            }
             break;
         }
         if ( ret == 0 )
