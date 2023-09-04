@@ -234,22 +234,29 @@ static std::string get_link_name( const char *pathname )
 
 static uid_t get_uid(const char *pathname)
 {
-    FILE *fp = fopen( pathname, "r" );
-    char line_buf [ 256 ];
-    char uid[256];
-    while ( fgets( line_buf, sizeof( line_buf ), fp ) )
+    int fd = open( pathname, O_RDONLY, 0 );
+
+    if ( fd >= 0 )
     {
-        if ( !strncmp( line_buf, "Uid:", 4 ) ){
-            int j=0;
-            for(int i=4;;i++){
-                char v = line_buf[i];
-                if (v >='0' && v<='9')
-                    uid[j++]=v;
-                else if (j)
-                    return atoll(uid);
+        char buf[ 16 * 1024 ];
+
+        ssize_t len = read( fd, buf, sizeof( buf ) );
+
+        close( fd );
+        fd = -1;
+
+        if ( len > 0 )
+        {
+            buf[ len - 1 ] = 0;
+
+            const char *uidstr = strstr( buf, "\nUid:" );
+            if ( uidstr )
+            {
+                return atoll( uidstr + 5 );
             }
         }
     }
+
     return -1;
 }
 
