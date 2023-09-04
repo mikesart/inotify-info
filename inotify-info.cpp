@@ -56,6 +56,8 @@
 static int g_verbose = 0;
 static size_t g_numthreads = 32;
 
+static char thousands_sep = ',';
+
 /*
  * filename info
  */
@@ -627,8 +629,64 @@ static bool init_inotify_proclist( std::vector< procinfo_t > &inotify_proclist )
     return true;
 }
 
+// From:
+//  https://stackoverflow.com/questions/1449805/how-to-format-a-number-using-comma-as-thousands-separator-in-c
+size_t str_format_uint32( char dst[16], uint32_t num )
+{
+    if ( thousands_sep )
+    {
+        char src[16];
+        char *p_src = src;
+        char *p_dst = dst;
+        int num_len, commas;
+
+        num_len = sprintf(src, "%u", num);
+
+        for (commas = 2 - num_len % 3; *p_src; commas = (commas + 1) % 3)
+        {
+            *p_dst++ = *p_src++;
+            if (commas == 1) {
+                *p_dst++ = thousands_sep;
+            }
+        }
+        *--p_dst = '\0';
+
+        return (size_t)(p_dst - dst);
+    }
+
+    return sprintf(dst, "%u", num);
+}
+
 static void print_inotify_proclist( std::vector< procinfo_t > &inotify_proclist )
 {
+#if 0
+    // test data
+    procinfo_t proc_info = {};
+    proc_info.pid = 100;
+    proc_info.appname = "fsnotifier";
+    proc_info.watches = 2;
+    proc_info.instances = 1;
+    inotify_proclist.push_back(proc_info);
+
+    proc_info.pid = 1000;
+    proc_info.appname = "evolution-addressbook-factor";
+    proc_info.watches = 116;
+    proc_info.instances = 10;
+    inotify_proclist.push_back(proc_info);
+
+    proc_info.pid = 22154;
+    proc_info.appname = "evolution-addressbook-factor blah blah";
+    proc_info.watches = 28200;
+    proc_info.instances = 100;
+    inotify_proclist.push_back(proc_info);
+
+    proc_info.pid = 0x7fffffff;
+    proc_info.appname = "evolution-addressbook-factor blah blah2";
+    proc_info.watches = 999999;
+    proc_info.instances = 999999999;
+    inotify_proclist.push_back(proc_info);
+#endif
+
     int lenPid = 10;
     int lenUid = 10;
     int lenApp = 10;
@@ -643,11 +701,15 @@ static void print_inotify_proclist( std::vector< procinfo_t > &inotify_proclist 
 
     for ( procinfo_t &procinfo : inotify_proclist )
     {
-        printf( "%*d %-*d %s%-*s%s %*u %*u\n",
+        char watches_str[16];
+
+        str_format_uint32(watches_str, procinfo.watches);
+
+        printf( "%*d %-*d %s%-*s%s %*s %*u\n",
             lenPid, procinfo.pid,
             lenUid, procinfo.uid,
             BYELLOW, lenApp, procinfo.appname.c_str(), RESET,
-            lenWatches, procinfo.watches,
+            lenWatches, watches_str,
             lenInstances, procinfo.instances );
 
         if ( g_verbose > 1 )
@@ -821,9 +883,12 @@ static void print_inotify_limits()
     printf( "%sINotify Limits:%s\n", BCYAN, RESET );
     for ( const std::string &fname : filenames )
     {
+        char str[16];
         uint32_t val = get_inotify_procfs_value( fname );
 
-        printf( "  %-20s %s%u%s\n", fname.c_str(), BGREEN, val, RESET );
+        str_format_uint32(str, val);
+
+        printf( "  %-20s %s%s%s\n", fname.c_str(), BGREEN, str, RESET );
     }
 }
 
@@ -886,6 +951,12 @@ int main( int argc, char *argv[] )
 {
     std::vector< std::string > cmdline_applist;
     std::vector< procinfo_t > inotify_proclist;
+
+    struct lconv *env = localeconv();
+    if (env && env->thousands_sep && env->thousands_sep[0])
+    {
+        thousands_sep = env->thousands_sep[0];
+    }
 
     parse_cmdline( argc, argv, cmdline_applist );
     print_separator();
