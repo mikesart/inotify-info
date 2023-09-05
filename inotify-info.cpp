@@ -58,6 +58,8 @@ static size_t g_numthreads = 32;
 
 static char thousands_sep = ',';
 
+static std::vector< std::string > ignore_dirs;
+
 /*
  * filename info
  */
@@ -463,6 +465,18 @@ int thread_info_t::parse_dirqueue_entry()
     if ( !path )
     {
         return -1;
+    }
+
+    for ( std::string &dname : ignore_dirs )
+    {
+        if ( dname == path )
+        {
+            if ( g_verbose > 1 )
+            {
+                printf( "Ignoring '%s'\n", path );
+            }
+            return 0;
+        }
     }
 
     int fd = open( path, O_RDONLY | O_DIRECTORY, 0 );
@@ -892,6 +906,72 @@ static void print_inotify_limits()
     }
 }
 
+static uint32_t parse_config_file( const char *config_file )
+{
+    uint32_t dir_count = 0;
+
+    FILE *fp = fopen( config_file, "r" );
+    if ( fp )
+    {
+        char line_buf[ 8192 ];
+
+        for ( ;; )
+        {
+            if ( !fgets( line_buf, sizeof( line_buf ) - 1, fp ) )
+                break;
+
+            if ( line_buf[ 0 ] == '/' )
+            {
+                size_t len = strcspn( line_buf, "\r\n" );
+
+                if ( len > 1 )
+                {
+                    line_buf[ len ] = 0;
+                    if ( line_buf[ len - 1 ] != '/' )
+                    {
+                        line_buf[ len ] = '/';
+                        line_buf[ len + 1 ] = '\0';
+                    }
+
+                    ignore_dirs.push_back( line_buf );
+                    dir_count++;
+                }
+            }
+        }
+
+        fclose( fp );
+    }
+
+    return dir_count;
+}
+
+static bool parse_ignore_dirs_file()
+{
+    const std::string filename = "inotify-info.config";
+
+    const char *xdg_config_dir = getenv( "XDG_CONFIG_HOME" );
+    if ( xdg_config_dir )
+    {
+        std::string config_file = std::string( xdg_config_dir ) + "/" + filename;
+        if ( parse_config_file( config_file.c_str() ) )
+            return true;
+
+        config_file = std::string( xdg_config_dir) + "/.config/" + filename;
+        if ( parse_config_file( config_file.c_str() ) )
+            return true;
+    }
+
+    const char *home_dir = getenv( "HOME" );
+    if ( home_dir )
+    {
+        std::string config_file = std::string( home_dir ) + "/" + filename;
+        if ( parse_config_file( config_file.c_str() ) )
+            return true;
+    }
+
+    return false;
+}
+
 static void print_usage( const char *appname )
 {
     printf( "Usage: %s [--threads=##] [appname | pid...]\n", appname );
@@ -907,6 +987,7 @@ static void parse_cmdline( int argc, char **argv, std::vector< std::string > &cm
     {
         { "verbose", no_argument, 0, 0 },
         { "threads", required_argument, 0, 0 },
+        { "ignoredir", required_argument, 0, 0 },
         { 0, 0, 0, 0 }
     };
 
@@ -924,6 +1005,16 @@ static void parse_cmdline( int argc, char **argv, std::vector< std::string > &cm
                 g_verbose++;
             else if ( !strcasecmp( "threads", long_opts[ opt_ind ].name ) )
                 g_numthreads = atoi( optarg );
+            else if ( !strcasecmp( "ignoredir", long_opts[ opt_ind ].name ) )
+            {
+                std::string dirname = optarg;
+                if ( dirname.size() > 1 )
+                {
+                    if ( optarg[ dirname.size() - 1 ] != '/' )
+                        dirname += "/";
+                    ignore_dirs.push_back( dirname );
+                }
+            }
             break;
         case 'v':
             g_verbose++;
@@ -939,6 +1030,18 @@ static void parse_cmdline( int argc, char **argv, std::vector< std::string > &cm
     for ( ; optind < argc; optind++ )
     {
         cmdline_applist.push_back( argv[ optind ] );
+    }
+
+    parse_ignore_dirs_file();
+
+    if ( g_verbose > 1 )
+    {
+        printf( "%lu ignore_dirs:\n", ignore_dirs.size() );
+
+        for ( std::string &dname : ignore_dirs )
+        {
+            printf( "  '%s'\n", dname.c_str() );
+        }
     }
 }
 
