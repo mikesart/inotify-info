@@ -914,13 +914,31 @@ static uint32_t parse_config_file( const char *config_file )
     if ( fp )
     {
         char line_buf[ 8192 ];
+        bool in_ignore_dirs_section = false;
 
         for ( ;; )
         {
             if ( !fgets( line_buf, sizeof( line_buf ) - 1, fp ) )
                 break;
 
-            if ( line_buf[ 0 ] == '/' )
+            if ( line_buf[0] == '#' )
+            {
+                // comment
+            }
+            else if ( !in_ignore_dirs_section )
+            {
+                size_t len = strcspn( line_buf, "\r\n" );
+
+                if ( ( len == 12 ) && !strncmp( "[ignoredirs]", line_buf, 12 ) )
+                {
+                    in_ignore_dirs_section = true;
+                }
+            }
+            else if ( line_buf[ 0 ] == '[' )
+            {
+                in_ignore_dirs_section = false;
+            }
+            else if ( in_ignore_dirs_section && ( line_buf[ 0 ] == '/' ) )
             {
                 size_t len = strcspn( line_buf, "\r\n" );
 
@@ -968,6 +986,10 @@ static bool parse_ignore_dirs_file()
         if ( parse_config_file( config_file.c_str() ) )
             return true;
     }
+
+    std::string config_file = "/etc/" + filename;
+    if ( parse_config_file( config_file.c_str() ) )
+        return true;
 
     return false;
 }
