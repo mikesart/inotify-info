@@ -22,6 +22,9 @@
  * THE SOFTWARE.
  */
 
+#define _GNU_SOURCE 1
+
+#include <limits.h>
 #include <dirent.h>
 #include <fcntl.h>
 #include <getopt.h>
@@ -374,6 +377,9 @@ char *thread_info_t::dequeue_directory()
     return path;
 }
 
+// statx() was added to Linux in kernel 4.11; library support was added in glibc 2.28.
+#if defined( __linux__ ) && ( ( __GLIBC__ >= 2 && __GLIBC_MINOR__ >= 28 ) || ( __GLIBC__ > 2 ) )
+
 struct statx mystatx( const char *filename, unsigned int mask = 0 )
 {
     struct statx statxbuf;
@@ -388,6 +394,51 @@ struct statx mystatx( const char *filename, unsigned int mask = 0 )
     return statxbuf;
 }
 
+static dev_t stat_get_dev_t( const char *filename )
+{
+    struct statx statxbuf = mystatx( filename );
+
+    return makedev( statxbuf.stx_dev_major, statxbuf.stx_dev_minor );
+}
+
+static uint64_t stat_get_ino( const char *filename )
+{
+    return mystatx( filename, STATX_INO ).stx_ino;
+}
+
+#else
+
+// Fall back to using stat() functions. Should work but be slower than using statx().
+
+static dev_t stat_get_dev_t( const char *filename )
+{
+    struct stat statbuf;
+
+    int ret = stat( filename, &statbuf );
+    if ( ret == -1 )
+    {
+        printf( "ERROR: stat-dev_t( %s ) failed. Errno: %d\n", filename, errno );
+        return 0;
+    }
+    return statbuf.st_dev;
+}
+
+static uint64_t stat_get_ino( const char *filename )
+{
+    struct stat statbuf;
+
+    int ret = stat( filename, &statbuf );
+    if ( ret == -1 )
+    {
+        printf( "ERROR: stat-ino( %s ) failed. Errno: %d\n", filename, errno );
+        return 0;
+    }
+
+    return statbuf.st_ino;
+}
+
+#endif
+
 void thread_info_t::add_filename( ino64_t inode, const char *path, const char *d_name, bool is_dir )
 {
     auto it = tdata.inode_set.find( inode );
@@ -397,8 +448,7 @@ void thread_info_t::add_filename( ino64_t inode, const char *path, const char *d
         const std::unordered_set< dev_t > &dev_set = it->second;
 
         std::string filename = std::string( path ) + d_name;
-        struct statx statxbuf = mystatx( filename.c_str() );
-        dev_t dev = makedev( statxbuf.stx_dev_major, statxbuf.stx_dev_minor );
+        dev_t dev = stat_get_dev_t( filename.c_str() );
 
         // Make sure the inode AND device ID match before adding.
         if ( dev_set.find( dev ) != dev_set.end() )
@@ -803,7 +853,7 @@ static uint32_t find_files_in_inode_set( const std::vector< procinfo_t > &inotif
         if ( idx == 0 )
         {
             // Add root dir in case someone is watching it
-            thread_info.add_filename( mystatx( "/", STATX_INO ).stx_ino, "/", "", false );
+            thread_info.add_filename( stat_get_ino( "/" ), "/", "", false );
             // Add and parse root
             thread_info.queue_directory( strdup( "/" ) );
             thread_info.parse_dirqueue_entry();
