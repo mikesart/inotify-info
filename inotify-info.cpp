@@ -354,7 +354,7 @@ static void inotify_parse_fddir( procinfo_t &procinfo )
             filename = string_format( "/proc/%d/fd/%s", procinfo.pid, dp_fd->d_name );
             filename = get_link_name( filename.c_str() );
 
-            if ( filename == "anon_inode:inotify" )
+            if ( filename == "anon_inode:inotify" || filename == "inotify" )
             {
                 filename = string_format( "/proc/%d/fdinfo/%s", procinfo.pid, dp_fd->d_name );
 
