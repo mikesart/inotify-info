@@ -30,7 +30,7 @@ COMPILER = $(shell $(CC) -v 2>&1 | grep -q "clang version" && echo clang || echo
 WARNINGS = -Wall -Wextra -Wpedantic -Wmissing-include-dirs -Wformat=2 -Wshadow
 ifneq ($(COMPILER),clang)
   # https://gcc.gnu.org/onlinedocs/gcc/Warning-Options.html
-  WARNINGS += -Wsuggest-attribute=format -Wimplicit-fallthrough=2
+  WARNINGS += -Wsuggest-attribute=format -Wall
 endif
 
 CFLAGS = $(WARNINGS) -march=native -fno-exceptions -gdwarf-4 -g2 -ggnu-pubnames -gsplit-dwarf
