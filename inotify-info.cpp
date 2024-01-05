@@ -59,6 +59,15 @@
 static int g_verbose = 0;
 static size_t g_numthreads = 32;
 
+/* true if at least one inotify watch is found in fdinfo files
+ * On a system with no active inotify watches, but which otherwise
+ * supports inotify watch info, this will prevent the watches column
+ * from being displayed.
+ * This case is indistinguishable from the case where the kernel does
+ * not support inotify watch info.
+ */
+static int g_kernel_provides_watches_info = 0;
+
 static char thousands_sep = ',';
 
 static std::vector< std::string > ignore_dirs;
@@ -290,6 +299,14 @@ static uint32_t inotify_parse_fdinfo_file( procinfo_t &procinfo, const char *fds
             if ( !fgets( line_buf, sizeof( line_buf ), fp ) )
                 break;
 
+            /* sample fdinfo; inotify line added in linux 3.8, available if
+             * kernel compiled with CONFIG_INOTIFY_USER and CONFIG_PROC_FS
+             *   pos:    0
+             *   flags:  00
+             *   mnt_id: 15
+             *   ino:    5865
+             *   inotify wd:1 ino:80001 sdev:800011 mask:100 ignored_mask:0 fhandle-bytes:8 fhandle-type:1 f_handle:01000800bc1b8c7c
+             */
             if ( !strncmp( line_buf, "inotify ", 8 ) )
             {
                 watch_count++;
@@ -341,12 +358,11 @@ static void inotify_parse_fddir( procinfo_t &procinfo )
             {
                 filename = string_format( "/proc/%d/fdinfo/%s", procinfo.pid, dp_fd->d_name );
 
-                uint32_t count = inotify_parse_fdinfo_file( procinfo, filename.c_str() );
-                if ( count )
-                {
-                    procinfo.instances++;
-                    procinfo.watches += count;
-                }
+                procinfo.instances++;
+                procinfo.watches += inotify_parse_fdinfo_file( procinfo, filename.c_str() );
+
+                /* If any watches have been found, enable the stats display */
+                g_kernel_provides_watches_info |= !!procinfo.watches;
             }
         }
     }
@@ -680,7 +696,7 @@ static bool init_inotify_proclist( std::vector< procinfo_t > &inotify_proclist )
 
                 inotify_parse_fddir( procinfo );
 
-                if ( procinfo.watches )
+                if ( procinfo.instances )
                 {
                     inotify_proclist.push_back( procinfo );
                 }
@@ -760,8 +776,14 @@ static void print_inotify_proclist( std::vector< procinfo_t > &inotify_proclist 
     for ( procinfo_t &procinfo : inotify_proclist )
         lenApp = std::max<int>( procinfo.appname.length(), lenApp );
 
-    printf( "%s%*s %-*s %-*s %*s %*s%s\n",
-        BCYAN, lenPid, "Pid", lenUid, "Uid", lenApp, "App", lenWatches, "Watches", lenInstances, "Instances", RESET);
+    /* If the number of watches is negative, the kernel doesn't support this info. omit the header*/
+    if (g_kernel_provides_watches_info)
+        printf( "%s%*s %-*s %-*s %*s %*s%s\n",
+            BCYAN, lenPid, "Pid", lenUid, "Uid", lenApp, "App", lenWatches, "Watches", lenInstances, "Instances", RESET);
+    else
+        printf( "%s%*s %-*s %*s %*s%s\n",
+            BCYAN, lenPid, "Pid", lenUid, "Uid", lenApp, "App", lenInstances, "Instances", RESET);
+
 
     for ( procinfo_t &procinfo : inotify_proclist )
     {
@@ -769,12 +791,19 @@ static void print_inotify_proclist( std::vector< procinfo_t > &inotify_proclist 
 
         str_format_uint32(watches_str, procinfo.watches);
 
-        printf( "%*d %-*d %s%-*s%s %*s %*u\n",
-            lenPid, procinfo.pid,
-            lenUid, procinfo.uid,
-            BYELLOW, lenApp, procinfo.appname.c_str(), RESET,
-            lenWatches, watches_str,
-            lenInstances, procinfo.instances );
+        if (g_kernel_provides_watches_info)
+            printf( "%*d %-*d %s%-*s%s %*s %*u\n",
+                lenPid, procinfo.pid,
+                lenUid, procinfo.uid,
+                BYELLOW, lenApp, procinfo.appname.c_str(), RESET,
+                lenWatches, watches_str,
+                lenInstances, procinfo.instances );
+        else
+            printf( "%*d %-*d %s%-*s%s %*u\n",
+                lenPid, procinfo.pid,
+                lenUid, procinfo.uid,
+                BYELLOW, lenApp, procinfo.appname.c_str(), RESET,
+                lenInstances, procinfo.instances );
 
         if ( g_verbose > 1 )
         {
@@ -1153,10 +1182,13 @@ int main( int argc, char *argv[] )
             total_instances += procinfo.instances;
         }
 
-        print_inotify_proclist( inotify_proclist );
-        print_separator();
+        if (inotify_proclist.size()) {
+            print_inotify_proclist( inotify_proclist );
+            print_separator();
+        }
 
-        printf( "Total inotify Watches:   %s%u%s\n", BGREEN, total_watches, RESET );
+        if (g_kernel_provides_watches_info)
+            printf( "Total inotify Watches:   %s%u%s\n", BGREEN, total_watches, RESET );
         printf( "Total inotify Instances: %s%u%s\n", BGREEN, total_instances, RESET );
         print_separator();
 
