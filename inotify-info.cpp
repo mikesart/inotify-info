@@ -33,6 +33,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <libgen.h>
+#include <locale.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <syscall.h>
@@ -692,7 +694,7 @@ static bool init_inotify_proclist( std::vector< procinfo_t > &inotify_proclist )
             procinfo.executable = get_link_name( executable.c_str() );
             if ( !procinfo.executable.empty() )
             {
-                procinfo.appname = basename( procinfo.executable.c_str() );
+                procinfo.appname = basename( (char*)procinfo.executable.c_str() );
 
                 inotify_parse_fddir( procinfo );
 
