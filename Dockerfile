@@ -1,4 +1,4 @@
-FROM debian
+FROM debian:stable-slim
 
 RUN apt-get update \
  && apt-get install build-essential -y \
@@ -11,4 +11,7 @@ COPY . .
 
 RUN make
 
-CMD ./_release/inotify-info
+FROM debian:stable-slim
+COPY --from=0 /inotify-info/_release/inotify-info /bin/inotify-info
+
+CMD /bin/inotify-info
