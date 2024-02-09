@@ -1,6 +1,8 @@
 ---
 name: test
-on: [push]
+on:
+  push:
+  pull_request:
 concurrency:
   # Cancels pending runs when a PR gets updated.
   group: ${{ github.head_ref || github.run_id }}-${{ github.actor }}
@@ -22,6 +24,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          key: zig-sdk-and-cache-${{ hashFiles('.github/workflows/ci.yaml') }}
+          path: |
+            zig-sdk
+            ~/.cache/zig
       - run: |
           if [ ! -d zig-sdk ]; then
             wget --progress=dot:mega \
@@ -31,12 +39,6 @@ jobs:
             && mv zig-linux-* zig-sdk \
             && ln -s zig-sdk/zig
           fi
-      - uses: actions/cache@v4
-        with:
-          key: zig-sdk-and-cache-${{ hashFiles('.github/workflows/ci.yaml') }}
-          path: |
-            zig-sdk
-            ~/.cache/zig
       - run: make -j$(nproc)
         env:
           CC: ./zig cc -target x86_64-linux-musl
