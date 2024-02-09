@@ -39,11 +39,6 @@ CXXFLAGS = -fno-rtti -Woverloaded-virtual
 LDFLAGS = -march=native -gdwarf-4 -g2 -Wl,--build-id=sha1
 LIBS = -Wl,--no-as-needed -lm -ldl -lpthread -lstdc++
 
-ifneq ("$(wildcard /usr/bin/ld.gold)","")
-  $(info Using gold linker...)
-  LDFLAGS += -fuse-ld=gold -Wl,--gdb-index
-endif
-
 CFILES = \
 	inotify-info.cpp \
 	lfqueue/lfqueue.c
@@ -70,7 +65,7 @@ endif
 ifeq ($(CFG), debug)
 	ODIR=_debug
 	CFLAGS += -O0 -DDEBUG
-	CFLAGS += -D_GLIBCXX_DEBUG -D_GLIBCXX_DEBUG_PEDANTIC -D_GLIBCXX_SANITIZE_VECTOR -D_LIBCPP_DEBUG=1
+	CFLAGS += -D_GLIBCXX_DEBUG -D_GLIBCXX_DEBUG_PEDANTIC -D_GLIBCXX_SANITIZE_VECTOR -D_LIBCPP_DEBUG=1 -D_LIBCPP_ENABLE_DEBUG_MODE=1
 else
 	ODIR=_release
 	CFLAGS += -O2 -DNDEBUG

@@ -22,4 +22,4 @@ RUN CC="/zig/zig cc -target $(uname -m)-linux-musl" \
 FROM scratch
 COPY --from=0 /inotify-info/_release/inotify-info /inotify-info
 
-CMD /inotify-info
+ENTRYPOINT ["/inotify-info"]
