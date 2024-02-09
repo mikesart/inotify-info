@@ -1,0 +1,51 @@
+---
+name: test
+on: [push]
+concurrency:
+  # Cancels pending runs when a PR gets updated.
+  group: ${{ github.head_ref || github.run_id }}-${{ github.actor }}
+  cancel-in-progress: true
+jobs:
+
+  build-with-gcc:
+    strategy:
+      matrix:
+        cfg: [debug, release]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get install -y build-essential
+      - run: make CFG=${{ matrix.cfg}} -j$(nproc)
+      - run: _${{ matrix.cfg }}/inotify-info
+
+  build-with-zig:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          if [ ! -d zig-sdk ]; then
+            wget --progress=dot:mega \
+              https://ziglang.org/download/0.11.0/zig-linux-$(uname -m)-0.11.0.tar.xz \
+            && tar -xJf zig-linux-*.tar.xz \
+            && rm zig-linux-*.xz \
+            && mv zig-linux-* zig-sdk \
+            && ln -s zig-sdk/zig
+          fi
+      - uses: actions/cache@v4
+        with:
+          key: zig-sdk-and-cache-${{ hashFiles('.github/workflows/ci.yaml') }}
+          path: |
+            zig-sdk
+            ~/.cache/zig
+      - run: make -j$(nproc)
+        env:
+          CC: ./zig cc -target x86_64-linux-musl
+          CXX: ./zig c++ -target x86_64-linux-musl
+      - run: _release/inotify-info
+
+  build-with-docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t inotify-info .
+      - run: docker run --rm --privileged -v /proc:/proc inotify-info
