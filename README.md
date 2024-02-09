@@ -166,6 +166,12 @@ Searching '/' for listed inodes... (8 threads)
 docker run --rm --privileged -v /proc:/proc inotify-info
 ```
 
+## Run on Nix(OS)
+
+```
+nix run nixpkgs#inotify-info
+```
+
 ## Credits
 
 [lfqueue][lfqueue] is [BSD-2-Clause License][bsd]
