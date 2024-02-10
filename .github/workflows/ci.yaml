@@ -27,22 +27,17 @@ jobs:
       - uses: actions/cache@v4
         with:
           key: zig-sdk-and-cache-${{ hashFiles('.github/workflows/ci.yaml') }}
-          path: |
-            zig-sdk
-            ~/.cache/zig
+          path: ~/.cache/zig
       - run: |
-          if [ ! -d zig-sdk ]; then
-            wget --progress=dot:mega \
-              https://ziglang.org/download/0.11.0/zig-linux-$(uname -m)-0.11.0.tar.xz \
-            && tar -xJf zig-linux-*.tar.xz \
-            && rm zig-linux-*.xz \
-            && mv zig-linux-* zig-sdk \
-            && ln -s zig-sdk/zig
-          fi
-      - run: make -j$(nproc)
-        env:
-          CC: ./zig cc -target x86_64-linux-musl
-          CXX: ./zig c++ -target x86_64-linux-musl
+          wget --progress=dot:mega \
+            https://ziglang.org/download/0.11.0/zig-linux-$(uname -m)-0.11.0.tar.xz
+          tar -xJf zig-linux-*.tar.xz
+          rm zig-linux-*.xz
+          mv zig-linux-* zig-sdk
+      - run: |
+          make -j$(nproc) \
+            CC="zig-sdk/zig cc -target $(uname -m)-linux-musl" \
+            CXX="zig-sdk/zig c++ -target $(uname -m)-linux-musl"
       - run: _release/inotify-info
 
   build-with-docker:
