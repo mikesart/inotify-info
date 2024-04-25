@@ -1,2 +1,4 @@
 _debug/
 _release/
+
+/inotify-info-v*.tar.gz

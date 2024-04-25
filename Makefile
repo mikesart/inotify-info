@@ -109,3 +109,9 @@ clean:
 	$(VERBOSE_PREFIX)$(RM) $(OBJS)
 	$(VERBOSE_PREFIX)$(RM) $(OBJS:.o=.d)
 	$(VERBOSE_PREFIX)$(RM) $(OBJS:.o=.dwo)
+
+define RELEASE_RULES
+inotify-info-$(TAG).tar.gz:
+	git archive --prefix=inotify-info-$(TAG)/ $(TAG) | gzip -n > $$@
+endef
+$(foreach TAG,$(shell git tag 2>/dev/null),$(eval $(RELEASE_RULES)))
