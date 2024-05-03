@@ -103,6 +103,10 @@ $(ODIR)/%.o: %.cpp Makefile
 	@$(MKDIR) $(dir $@)
 	$(VERBOSE_PREFIX)$(CXX) -MMD -MP -std=c++11 $(CFLAGS) $(CXXFLAGS) -o $@ -c $<
 
+.PHONY: lint
+lint:
+	find . -name '*.h' -o -name '*.c' -o -name '*.cpp' | xargs clang-format -i --style=webkit
+
 .PHONY: clean
 
 clean:
