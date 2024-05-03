@@ -72,7 +72,6 @@ else
 endif
 
 PROJ = $(ODIR)/$(NAME)
-$(info Building $(ODIR)/$(NAME)...)
 
 ifeq ($(VERBOSE), 1)
 	VERBOSE_PREFIX=
@@ -112,6 +111,6 @@ clean:
 
 define RELEASE_RULES
 inotify-info-$(TAG).tar.gz:
-	git archive --prefix=inotify-info-$(TAG)/ $(TAG) | gzip -n > $$@
+	git archive --prefix=inotify-info-$(TAG)/ v$(TAG) | gzip -n > $$@
 endef
-$(foreach TAG,$(shell git tag 2>/dev/null),$(eval $(RELEASE_RULES)))
+$(foreach TAG,$(shell git tag | sed -n '/^v/ s/^v//p' 2>/dev/null),$(eval $(RELEASE_RULES)))
