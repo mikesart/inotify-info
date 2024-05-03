@@ -38,7 +38,7 @@ jobs:
           path: ~/.cache/zig
       - run: |
           wget --progress=dot:mega \
-            https://ziglang.org/download/0.11.0/zig-linux-$(uname -m)-0.11.0.tar.xz
+            https://ziglang.org/download/0.12.0/zig-linux-$(uname -m)-0.12.0.tar.xz
           tar -xJf zig-linux-*.tar.xz
           rm zig-linux-*.xz
           mv zig-linux-* zig-sdk
