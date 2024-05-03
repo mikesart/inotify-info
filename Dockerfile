@@ -6,7 +6,7 @@ FROM alpine
 #
 # Upstream tarball is statically linked, making it small and convenient to use.
 RUN apk add make \
- && wget https://ziglang.org/download/0.11.0/zig-linux-$(uname -m)-0.11.0.tar.xz \
+ && wget https://ziglang.org/download/0.12.0/zig-linux-$(uname -m)-0.12.0.tar.xz \
  && tar -xJf zig-linux-*.tar.xz \
  && rm zig-linux-*.xz \
  && mv zig-linux-* zig
