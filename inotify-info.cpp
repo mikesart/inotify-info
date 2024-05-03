@@ -52,6 +52,10 @@
 #include "inotify-info.h"
 #include "lfqueue/lfqueue.h"
 
+#ifndef VERSION
+#define VERSION "unknown"
+#endif
+
 /*
  * TODO
  *  - Comments
@@ -1075,13 +1079,17 @@ static bool parse_ignore_dirs_file()
     return false;
 }
 
+static void print_version ( )
+{
+    printf( "%s\n", VERSION );
+}
+
 static void print_usage( const char *appname )
 {
     printf( "Usage: %s [--threads=##] [appname | pid...]\n", appname );
     printf( "    [-vv]\n" );
+    printf( "    [--version]\n" );
     printf( "    [-?|-h|--help]\n" );
-
-    exit( -1 );
 }
 
 static void parse_cmdline( int argc, char **argv, std::vector< std::string > &cmdline_applist )
@@ -1091,6 +1099,8 @@ static void parse_cmdline( int argc, char **argv, std::vector< std::string > &cm
         { "verbose", no_argument, 0, 0 },
         { "threads", required_argument, 0, 0 },
         { "ignoredir", required_argument, 0, 0 },
+        { "version", no_argument, 0, 0 },
+        { "help", no_argument, 0, 0 },
         { 0, 0, 0, 0 }
     };
 
@@ -1104,6 +1114,14 @@ static void parse_cmdline( int argc, char **argv, std::vector< std::string > &cm
         switch ( c )
         {
         case 0:
+            if ( !strcasecmp( "help", long_opts[ opt_ind ].name ) ) {
+                print_usage ( argv[ 0 ] );
+                exit ( 0 );
+            };
+            if ( !strcasecmp( "version", long_opts[ opt_ind ].name ) ) {
+                print_version ( );
+                exit ( 0 );
+            }
             if ( !strcasecmp( "verbose", long_opts[ opt_ind ].name ) )
                 g_verbose++;
             else if ( !strcasecmp( "threads", long_opts[ opt_ind ].name ) )
@@ -1124,8 +1142,11 @@ static void parse_cmdline( int argc, char **argv, std::vector< std::string > &cm
             break;
         case 'h':
         case '?':
+            print_usage ( argv[ 0 ] );
+            exit ( 0 );
         default:
             print_usage( argv[ 0 ] );
+            exit ( -1 );
             break;
         }
     }
