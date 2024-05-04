@@ -52,8 +52,8 @@
 #include "inotify-info.h"
 #include "lfqueue/lfqueue.h"
 
-#ifndef VERSION
-#define VERSION "unknown"
+#ifndef INOTIFYINFO_VERSION
+#error INOTIFYINFO_VERSION must be set
 #endif
 
 /*
@@ -992,7 +992,7 @@ static bool parse_ignore_dirs_file()
 
 static void print_version()
 {
-    printf("%s\n", VERSION);
+    printf("%s\n", INOTIFYINFO_VERSION);
 }
 
 static void print_usage(const char* appname)
