@@ -120,4 +120,4 @@ define RELEASE_RULES
 inotify-info-$(TAG).tar.gz:
 	git archive --prefix=inotify-info-$(TAG)/ v$(TAG) | gzip -n > $$@
 endef
-$(foreach TAG,$(shell git tag | sed -n '/^v/ s/^v//p' 2>/dev/null),$(eval $(RELEASE_RULES)))
+$(foreach TAG,$(shell git tag 2>/dev/null | sed -n '/^v/ s/^v//p'),$(eval $(RELEASE_RULES)))
