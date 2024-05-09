@@ -22,12 +22,6 @@ Building _debug/inotify-info...
 Linking _debug/inotify-info...
 ```
 
-Or you can build Docker image.
-
-```sh
-docker build . -t inotify-info
-```
-
 ## Install
 You are free to copy the resulting executable to any suitable location in your `$PATH`.
 ```
@@ -163,6 +157,7 @@ Searching '/' for listed inodes... (8 threads)
 ## Run on Docker
 
 ```sh
+docker build . -t inotify-info
 docker run --rm --privileged -v /proc:/proc inotify-info
 ```
 

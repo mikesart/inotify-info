@@ -1,6 +1,6 @@
 FROM alpine:edge
 
-RUN apk add make zig
+RUN apk add make zig git
 
 WORKDIR inotify-info
 
