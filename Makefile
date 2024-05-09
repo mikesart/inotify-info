@@ -35,11 +35,22 @@ ifneq ($(COMPILER),clang)
   WARNINGS += -Wsuggest-attribute=format -Wall
 endif
 
-CFLAGS = $(WARNINGS) -march=native -fno-exceptions -gdwarf-4 -g2 -ggnu-pubnames -gsplit-dwarf
-CFLAGS += -D_LARGEFILE64_SOURCE=1 -D_FILE_OFFSET_BITS=64
-CFLAGS += -DINOTIFYINFO_VERSION=\"$(INOTIFYINFO_VERSION)\"
-CXXFLAGS = -fno-rtti -Woverloaded-virtual
-LDFLAGS = -march=native -gdwarf-4 -g2 -Wl,--build-id=sha1
+DEFINES  = -D_LARGEFILE64_SOURCE=1 -D_FILE_OFFSET_BITS=64
+DEFINES += -DINOTIFYINFO_VERSION=\"$(INOTIFYINFO_VERSION)\"
+
+# default overridable flags
+cflags = -march=native -fno-exceptions -gdwarf-4 -g2 -ggnu-pubnames -gsplit-dwarf
+ldflags = -march=native -gdwarf-4 -g2 -Wl,--build-id=sha1
+
+CFLAGS ?= $(cflags)
+CFLAGS += $(WARNINGS) $(DEFINES)
+CFLAGS += -std=gnu99
+
+CXXFLAGS ?= $(cflags)
+CXXFLAGS += $(WARNINGS) $(DEFINES)
+CXXFLAGS += -std=c++11 -fno-rtti -Woverloaded-virtual
+
+LDFLAGS ?= $(ldflags)
 LIBS = -Wl,--no-as-needed -lm -ldl -lpthread -lstdc++
 
 CFILES = \
@@ -96,12 +107,12 @@ $(ODIR)/$(NAME): $(OBJS)
 $(ODIR)/%.o: %.c Makefile
 	$(VERBOSE_PREFIX)echo "---- $< ----";
 	@$(MKDIR) $(dir $@)
-	$(VERBOSE_PREFIX)$(CC) -MMD -MP -std=gnu99 $(CFLAGS) -o $@ -c $<
+	$(VERBOSE_PREFIX)$(CC) -MMD -MP $(CFLAGS) -o $@ -c $<
 
 $(ODIR)/%.o: %.cpp Makefile
 	$(VERBOSE_PREFIX)echo "---- $< ----";
 	@$(MKDIR) $(dir $@)
-	$(VERBOSE_PREFIX)$(CXX) -MMD -MP -std=c++11 $(CFLAGS) $(CXXFLAGS) -o $@ -c $<
+	$(VERBOSE_PREFIX)$(CXX) -MMD -MP $(CXXFLAGS) -o $@ -c $<
 
 .PHONY: lint
 lint:
