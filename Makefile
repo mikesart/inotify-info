@@ -38,19 +38,12 @@ endif
 DEFINES  = -D_LARGEFILE64_SOURCE=1 -D_FILE_OFFSET_BITS=64
 DEFINES += -DINOTIFYINFO_VERSION=\"$(INOTIFYINFO_VERSION)\"
 
-# default overridable flags
-cflags = -march=native -fno-exceptions -gdwarf-4 -g2 -ggnu-pubnames -gsplit-dwarf
-ldflags = -march=native -gdwarf-4 -g2 -Wl,--build-id=sha1
-
-CFLAGS ?= $(cflags)
 CFLAGS += $(WARNINGS) $(DEFINES)
-CFLAGS += -std=gnu99
+CFLAGS += -std=gnu99 -fno-exceptions
 
-CXXFLAGS ?= $(cflags)
 CXXFLAGS += $(WARNINGS) $(DEFINES)
-CXXFLAGS += -std=c++11 -fno-rtti -Woverloaded-virtual
+CXXFLAGS += -std=c++11 -fno-exceptions -fno-rtti -Woverloaded-virtual
 
-LDFLAGS ?= $(ldflags)
 LIBS = -Wl,--no-as-needed -lm -ldl -lpthread -lstdc++
 
 CFILES = \
@@ -73,6 +66,7 @@ ifeq ($(ASAN), 1)
 	ASAN_FLAGS += -fsanitize=object-size # enable object size checking, detect various out-of-bounds accesses.
 	ASAN_FLAGS += -fsanitize=alignment # enable alignment checking, detect various misaligned objects;
 	CFLAGS += $(ASAN_FLAGS)
+	CXXFLAGS += $(ASAN_FLAGS)
 	LDFLAGS += $(ASAN_FLAGS)
 endif
 
