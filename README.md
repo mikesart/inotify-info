@@ -153,12 +153,15 @@ Searching '/' for listed inodes... (8 threads)
  94111468 [10304h] /home/mikesart/.cache/xfce4/xfce4-appfinder/
 ```
 
-## Run on Docker
+## Run on Docker/podman
 
 ```sh
 docker build . -t inotify-info
 docker run --rm --privileged -v /proc:/proc inotify-info
 ```
+
+When running under [podman][podman] non-root mode, append `--ulimit
+nofile=65535:65535` to the `podman build` command.
 
 ## Run on Nix(OS)
 
@@ -175,3 +178,4 @@ nix run nixpkgs#inotify-info
 [problem2]: https://unix.stackexchange.com/questions/15509/whos-consuming-my-inotify-resources  
 [lfqueue]:  https://github.com/Taymindis/lfqueue
 [bsd]:      https://github.com/Taymindis/lfqueue/blob/master/LICENSE
+[podman]:   https://podman.io/

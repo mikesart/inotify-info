@@ -8,7 +8,7 @@ COPY . .
 
 RUN CC="zig cc -target $(uname -m)-linux-musl" \
     CXX="zig c++ -target $(uname -m)-linux-musl" \
-    make
+    make VERBOSE=1
 
 FROM scratch
 COPY --from=0 /inotify-info/_release/inotify-info /inotify-info
