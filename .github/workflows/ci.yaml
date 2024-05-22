@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get install -y build-essential
-      - run: make CFG=${{ matrix.cfg}} -j$(nproc)
+      - run: make VERBOSE=1 CFG=${{ matrix.cfg}} -j$(nproc)
       - run: _${{ matrix.cfg }}/inotify-info
 
   build-with-zig:
@@ -43,7 +43,7 @@ jobs:
           rm zig-linux-*.xz
           mv zig-linux-* zig-sdk
       - run: |
-          make -j$(nproc) \
+          make VERBOSE=1 -j$(nproc) \
             CC="zig-sdk/zig cc -target $(uname -m)-linux-musl" \
             CXX="zig-sdk/zig c++ -target $(uname -m)-linux-musl"
       - run: _release/inotify-info
