@@ -121,6 +121,13 @@ clean:
 	$(VERBOSE_PREFIX)$(RM) $(OBJS:.o=.d)
 	$(VERBOSE_PREFIX)$(RM) $(OBJS:.o=.dwo)
 
+.PHONY: install
+
+install: all
+	$(MKDIR) /usr/local/bin
+	cp $(PROJ) /usr/local/bin/$(NAME)
+
+
 define RELEASE_RULES
 inotify-info-$(TAG).tar.gz:
 	git archive --prefix=inotify-info-$(TAG)/ v$(TAG) | gzip -n > $$@
