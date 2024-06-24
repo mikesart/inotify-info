@@ -20,6 +20,9 @@ ifeq ($(CFG), debug)
     ASAN ?= 1
 endif
 
+PREFIX ?= /usr/local
+BINDIR := $(PREFIX)/bin
+
 LD = $(CC)
 RM = rm -f
 MKDIR = mkdir -p
@@ -124,8 +127,20 @@ clean:
 .PHONY: install
 
 install: all
-	$(MKDIR) /usr/local/bin
-	cp $(PROJ) /usr/local/bin/$(NAME)
+	$(MKDIR) $(BINDIR)
+	cp $(PROJ) $(BINDIR)/$(NAME)
+
+
+.PHONY: uninstall
+
+uninstall:
+	$(RM) $(BINDIR)/$(NAME)
+
+.PHONY: install-for-distro
+
+install-for-distro: all
+	$(MKDIR) /usr/bin
+	cp $(PROJ) /usr/bin/$(NAME)
 
 
 define RELEASE_RULES
