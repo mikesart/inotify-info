@@ -127,21 +127,12 @@ clean:
 .PHONY: install
 
 install: all
-	$(MKDIR) $(BINDIR)
-	cp $(PROJ) $(BINDIR)/$(NAME)
-
+	install -D $(PROJ) $(BINDIR)/$(NAME)
 
 .PHONY: uninstall
 
 uninstall:
 	$(RM) $(BINDIR)/$(NAME)
-
-.PHONY: install-for-distro
-
-install-for-distro: all
-	$(MKDIR) /usr/bin
-	cp $(PROJ) /usr/bin/$(NAME)
-
 
 define RELEASE_RULES
 inotify-info-$(TAG).tar.gz:
