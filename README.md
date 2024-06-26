@@ -23,9 +23,10 @@ Linking _debug/inotify-info...
 ```
 
 ## Install
-The resulting executable will be at `_release/inotify-info`. You are free to copy the resulting executable to any suitable location in your `$PATH`.
 
-Or run `$ make install` to install to `/usr/local/bin/`.
+The resulting executable will be at `_release/inotify-info`. You are free to
+copy the resulting executable to any suitable location in your `$PATH` or run
+`make install` to install to `/usr/local/bin`.
 
 ## Run (Prints Summary)
 ```
