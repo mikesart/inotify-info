@@ -389,7 +389,7 @@ struct statx mystatx(const char* filename, unsigned int mask = 0)
     int flags = AT_NO_AUTOMOUNT | AT_SYMLINK_NOFOLLOW | AT_STATX_DONT_SYNC;
 
     if (statx(0, filename, flags, mask, &statxbuf) == -1) {
-        printf("ERROR: statx-ino( %s ) failed. Errno: %d\n", filename, errno);
+        printf("ERROR: statx-ino( %s ) failed. Errno: %d (%s)\n", filename, errno, strerror(errno));
         memset(&statxbuf, 0, sizeof(statxbuf));
     }
 
@@ -418,7 +418,7 @@ static dev_t stat_get_dev_t(const char* filename)
 
     int ret = stat(filename, &statbuf);
     if (ret == -1) {
-        printf("ERROR: stat-dev_t( %s ) failed. Errno: %d\n", filename, errno);
+        printf("ERROR: stat-dev_t( %s ) failed. Errno: %d (%s)\n", filename, errno, strerror(errno));
         return 0;
     }
     return statbuf.st_dev;
@@ -430,7 +430,7 @@ static uint64_t stat_get_ino(const char* filename)
 
     int ret = stat(filename, &statbuf);
     if (ret == -1) {
-        printf("ERROR: stat-ino( %s ) failed. Errno: %d\n", filename, errno);
+        printf("ERROR: stat-ino( %s ) failed. Errno: %d (%s)\n", filename, errno, strerror(errno));
         return 0;
     }
 
@@ -543,7 +543,7 @@ int thread_info_t::parse_dirqueue_entry()
             }
 
             if (spew_error) {
-                printf("ERROR: sys_getdents64 failed on '%s': %d errno:%d\n", path, ret, errno);
+                printf("ERROR: sys_getdents64 failed on '%s': %d errno: %d (%s)\n", path, ret, errno, strerror(errno));
             }
             break;
         }
@@ -631,7 +631,7 @@ static bool init_inotify_proclist(std::vector<procinfo_t>& inotify_proclist)
     DIR* dir_proc = opendir("/proc");
 
     if (!dir_proc) {
-        printf("ERROR: opendir /proc failed: %d\n", errno);
+        printf("ERROR: opendir /proc failed: %d (%s)\n", errno, strerror(errno));
         return false;
     }
 
