@@ -1,4 +1,4 @@
-FROM alpine:edge
+FROM alpine
 
 RUN apk add make zig git
 
