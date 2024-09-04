@@ -56,12 +56,6 @@
 #error INOTIFYINFO_VERSION must be set
 #endif
 
-/*
- * TODO
- *  - Comments
- *  - Disable color
- */
-
 static int g_verbose = 0;
 static size_t g_numthreads = 32;
 
@@ -77,6 +71,24 @@ static int g_kernel_provides_watches_info = 0;
 static char thousands_sep = ',';
 
 static std::vector<std::string> ignore_dirs;
+
+const char *RESET   = "\x1b[0m";
+const char *YELLOW  = "\x1b[0;33m";
+const char *CYAN    = "\x1b[0;36m";
+const char *BGRAY   = "\x1b[1;30m";
+const char *BGREEN  = "\x1b[1;32m";
+const char *BYELLOW = "\x1b[1;33m";
+const char *BCYAN   = "\x1b[1;36m";
+
+void set_no_color() {
+    RESET   = "";
+    YELLOW  = "";
+    CYAN    = "";
+    BGRAY   = "";
+    BGREEN  = "";
+    BYELLOW = "";
+    BCYAN   = "";
+}
 
 /*
  * filename info
@@ -1007,6 +1019,7 @@ static void parse_cmdline(int argc, char** argv, std::vector<std::string>& cmdli
 {
     static struct option long_opts[] = {
         { "verbose", no_argument, 0, 0 },
+        { "no-color", no_argument, 0, 0 },
         { "threads", required_argument, 0, 0 },
         { "ignoredir", required_argument, 0, 0 },
         { "version", no_argument, 0, 0 },
@@ -1032,6 +1045,8 @@ static void parse_cmdline(int argc, char** argv, std::vector<std::string>& cmdli
             }
             if (!strcasecmp("verbose", long_opts[opt_ind].name))
                 g_verbose++;
+            else if (!strcasecmp("no-color", long_opts[opt_ind].name))
+                set_no_color();
             else if (!strcasecmp("threads", long_opts[opt_ind].name))
                 g_numthreads = atoi(optarg);
             else if (!strcasecmp("ignoredir", long_opts[opt_ind].name)) {

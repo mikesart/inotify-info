@@ -22,24 +22,6 @@
  * THE SOFTWARE.
  */
 
-#define RESET "\x1b[0m"
-#define GRAY "\x1b[0;30m"
-#define RED "\x1b[0;31m"
-#define GREEN "\x1b[0;32m"
-#define YELLOW "\x1b[0;33m"
-#define BLUE "\x1b[0;34m"
-#define MAGENTA "\x1b[0;35m"
-#define CYAN "\x1b[0;36m"
-#define WHITE "\x1b[0;37m"
-#define BGRAY "\x1b[1;30m"
-#define BRED "\x1b[1;31m"
-#define BGREEN "\x1b[1;32m"
-#define BYELLOW "\x1b[1;33m"
-#define BBLUE "\x1b[1;34m"
-#define BMAGENTA "\x1b[1;35m"
-#define BCYAN "\x1b[1;36m"
-#define BWHITE "\x1b[1;37m"
-
 #define TO_STR(x) #x
 #define TO_STR_VALUE(x) TO_STR(x)
 
