@@ -72,22 +72,23 @@ static char thousands_sep = ',';
 
 static std::vector<std::string> ignore_dirs;
 
-const char *RESET   = "\x1b[0m";
-const char *YELLOW  = "\x1b[0;33m";
-const char *CYAN    = "\x1b[0;36m";
-const char *BGRAY   = "\x1b[1;30m";
-const char *BGREEN  = "\x1b[1;32m";
-const char *BYELLOW = "\x1b[1;33m";
-const char *BCYAN   = "\x1b[1;36m";
+const char* RESET = "\x1b[0m";
+const char* YELLOW = "\x1b[0;33m";
+const char* CYAN = "\x1b[0;36m";
+const char* BGRAY = "\x1b[1;30m";
+const char* BGREEN = "\x1b[1;32m";
+const char* BYELLOW = "\x1b[1;33m";
+const char* BCYAN = "\x1b[1;36m";
 
-void set_no_color() {
-    RESET   = "";
-    YELLOW  = "";
-    CYAN    = "";
-    BGRAY   = "";
-    BGREEN  = "";
+void set_no_color()
+{
+    RESET = "";
+    YELLOW = "";
+    CYAN = "";
+    BGRAY = "";
+    BGREEN = "";
     BYELLOW = "";
-    BCYAN   = "";
+    BCYAN = "";
 }
 
 /*
