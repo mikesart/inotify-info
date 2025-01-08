@@ -58,6 +58,7 @@
 
 static int g_verbose = 0;
 static size_t g_numthreads = 32;
+static std::string g_search_path = "/"; // Default path to root
 
 /* true if at least one inotify watch is found in fdinfo files
  * On a system with no active inotify watches, but which otherwise
@@ -824,8 +825,8 @@ static uint32_t find_files_in_inode_set(const std::vector<procinfo_t>& inotify_p
 
     if (!tdata.init(g_numthreads, inotify_proclist))
         return 0;
-
-    printf("\n%sSearching '/' for listed inodes...%s (%lu threads)\n", BCYAN, RESET, g_numthreads);
+    printf("\n%sSearching '%s' for listed inodes...%s (%lu threads)\n",
+        BCYAN, g_search_path.c_str(), RESET, g_numthreads);
 
     // Initialize thread_info_t array
     std::vector<class thread_info_t> thread_array(g_numthreads, thread_info_t(tdata));
@@ -836,10 +837,10 @@ static uint32_t find_files_in_inode_set(const std::vector<procinfo_t>& inotify_p
         thread_info.idx = idx;
 
         if (idx == 0) {
-            // Add root dir in case someone is watching it
-            thread_info.add_filename(stat_get_ino("/"), "/", "", false);
+            // Add search dir in case someone is watching it
+            thread_info.add_filename(stat_get_ino(g_search_path.c_str()), g_search_path.c_str(), "", false);
             // Add and parse root
-            thread_info.queue_directory(strdup("/"));
+            thread_info.queue_directory(strdup(g_search_path.c_str()));
             thread_info.parse_dirqueue_entry();
         } else if (pthread_create(&thread_info.pthread_id, NULL, &parse_dirqueue_threadproc, &thread_info)) {
             printf("Warning: pthread_create failed. errno: %d\n", errno);
@@ -1003,6 +1004,28 @@ static bool parse_ignore_dirs_file()
     return false;
 }
 
+void parse_search_dir()
+{
+    // Check if the path is a valid directory
+    struct stat path_stat;
+    if (stat(g_search_path.c_str(), &path_stat) == 0) {
+        if (S_ISDIR(path_stat.st_mode)) {
+            // Ensure the g_search_path ends with "/"
+            if (g_search_path.back() != '/') {
+                g_search_path += '/';
+            }
+        } else {
+            // g_search_path exists but is not a directory
+            printf("ERROR: path (%s) is not a directory. Errno: %d (%s)\n", g_search_path.c_str(), errno, strerror(errno));
+            exit(1);
+        }
+    } else {
+        // g_search_path does not exist
+        printf("ERROR: path (%s) does not exist. Errno: %d (%s)\n", g_search_path.c_str(), errno, strerror(errno));
+        exit(1);
+    }
+}
+
 static void print_version()
 {
     printf("%s\n", INOTIFYINFO_VERSION);
@@ -1011,6 +1034,7 @@ static void print_version()
 static void print_usage(const char* appname)
 {
     printf("Usage: %s [--threads=##] [appname | pid...]\n", appname);
+    printf("    [-p=PATH] Path to search (default '/')\n");
     printf("    [-vv]\n");
     printf("    [--version]\n");
     printf("    [-?|-h|--help]\n");
@@ -1023,6 +1047,7 @@ static void parse_cmdline(int argc, char** argv, std::vector<std::string>& cmdli
         { "no-color", no_argument, 0, 0 },
         { "threads", required_argument, 0, 0 },
         { "ignoredir", required_argument, 0, 0 },
+        { "path", required_argument, 0, 0 },
         { "version", no_argument, 0, 0 },
         { "help", no_argument, 0, 0 },
         { 0, 0, 0, 0 }
@@ -1033,7 +1058,7 @@ static void parse_cmdline(int argc, char** argv, std::vector<std::string>& cmdli
 
     int c;
     int opt_ind = 0;
-    while ((c = getopt_long(argc, argv, "m:s:?hv", long_opts, &opt_ind)) != -1) {
+    while ((c = getopt_long(argc, argv, "m:s:p:?hv", long_opts, &opt_ind)) != -1) {
         switch (c) {
         case 0:
             if (!strcasecmp("help", long_opts[opt_ind].name)) {
@@ -1057,7 +1082,12 @@ static void parse_cmdline(int argc, char** argv, std::vector<std::string>& cmdli
                         dirname += "/";
                     ignore_dirs.push_back(dirname);
                 }
+            } else if (!strcasecmp("path", long_opts[opt_ind].name)) {
+                g_search_path = optarg;
             }
+            break;
+        case 'p':
+            g_search_path = optarg;
             break;
         case 'v':
             g_verbose++;
@@ -1078,6 +1108,7 @@ static void parse_cmdline(int argc, char** argv, std::vector<std::string>& cmdli
     }
 
     parse_ignore_dirs_file();
+    parse_search_dir();
 
     if (g_verbose > 1) {
         printf("%lu ignore_dirs:\n", ignore_dirs.size());
