@@ -22,6 +22,18 @@ Building _debug/inotify-info...
 Linking _debug/inotify-info...
 ```
 
+In restricted environments you may not have permission to build nor install packages.
+In this case, you can build an static binary and copy it to the target host:
+
+```
+# sudo dnf install glibc-static libstdc++-static
+# make LDFLAGS=-static
+# file _release/inotify-info
+_release/inotify-info: ELF 64-bit LSB executable, x86-64, version 1 (GNU/Linux), statically linked, BuildID[sha1]=b35cbaaa6118d277441e3b4b517be4d0e00a4105, for GNU/Linux 3.2.0, not stripped, too many notes (256)
+                                                                                 ^^^^^^^^^^^^^^^^^
+```
+
+
 ## Install
 
 The resulting executable will be at `_release/inotify-info`. You are free to
