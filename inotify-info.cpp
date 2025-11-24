@@ -59,6 +59,7 @@
 static int g_verbose = 0;
 static size_t g_numthreads = 32;
 static std::string g_search_path = "/"; // Default path to root
+static int g_sort_by_instances = 0; // Sort list by instances instead of watches
 
 /* true if at least one inotify watch is found in fdinfo files
  * On a system with no active inotify watches, but which otherwise
@@ -640,6 +641,11 @@ static bool watch_count_is_greater(procinfo_t elem1, procinfo_t elem2)
     return elem1.watches > elem2.watches;
 }
 
+static bool instance_count_is_greater(procinfo_t elem1, procinfo_t elem2)
+{
+    return elem1.instances > elem2.instances;
+}
+
 static bool init_inotify_proclist(std::vector<procinfo_t>& inotify_proclist)
 {
     DIR* dir_proc = opendir("/proc");
@@ -674,7 +680,10 @@ static bool init_inotify_proclist(std::vector<procinfo_t>& inotify_proclist)
             }
         }
     }
-    std::sort(inotify_proclist.begin(), inotify_proclist.end(), watch_count_is_greater);
+    if (g_sort_by_instances)
+        std::sort(inotify_proclist.begin(), inotify_proclist.end(), instance_count_is_greater);
+    else
+        std::sort(inotify_proclist.begin(), inotify_proclist.end(), watch_count_is_greater);
 
     closedir(dir_proc);
     return true;
@@ -1035,14 +1044,15 @@ static void print_usage(const char* appname)
 {
     printf("Usage: %s [options] [appname | pid...]\n", appname);
     printf("Where options are:\n");
-    printf("    [--threads=##]      Number of threads\n");
+    printf("    [--threads=##]        Number of threads\n");
     printf("    [-p=PATH]\n");
-    printf("    [--path=PATH]       Path to search (default '/')\n");
-    printf("    [--ignoredir=NAME]  Directories to ignore in searched path\n");
-    printf("    [-v|--verbose]      More option increase verbosity level\n");
-    printf("    [--no-color]        Do not colorize output\n");
-    printf("    [--version]         Show version and stop\n");
-    printf("    [-?|-h|--help]      Show this help and stop\n");
+    printf("    [--path=PATH]         Path to search (default '/')\n");
+    printf("    [--ignoredir=NAME]    Directories to ignore in searched path\n");
+    printf("    [--sort-by-instances] Sort list by instances instead of watches\n");
+    printf("    [-v|--verbose]        More option increase verbosity level\n");
+    printf("    [--no-color]          Do not colorize output\n");
+    printf("    [--version]           Show version and stop\n");
+    printf("    [-?|-h|--help]        Show this help and stop\n");
 }
 
 static void parse_cmdline(int argc, char** argv, std::vector<std::string>& cmdline_applist)
@@ -1053,6 +1063,7 @@ static void parse_cmdline(int argc, char** argv, std::vector<std::string>& cmdli
         { "threads", required_argument, 0, 0 },
         { "ignoredir", required_argument, 0, 0 },
         { "path", required_argument, 0, 0 },
+        { "sort-by-instances", no_argument, 0, 0 },
         { "version", no_argument, 0, 0 },
         { "help", no_argument, 0, 0 },
         { 0, 0, 0, 0 }
@@ -1089,6 +1100,8 @@ static void parse_cmdline(int argc, char** argv, std::vector<std::string>& cmdli
                 }
             } else if (!strcasecmp("path", long_opts[opt_ind].name)) {
                 g_search_path = optarg;
+            } else if (!strcasecmp("sort-by-instances", long_opts[opt_ind].name)) {
+                g_sort_by_instances = 1;
             }
             break;
         case 'p':
