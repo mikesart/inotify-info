@@ -59,6 +59,7 @@
 static int g_verbose = 0;
 static size_t g_numthreads = 32;
 static std::string g_search_path = "/"; // Default path to root
+static int g_short_stat = 0; // Quick overview: limits + totals only
 static int g_sort_by_instances = 0; // Sort list by instances instead of watches
 
 /* true if at least one inotify watch is found in fdinfo files
@@ -1048,6 +1049,7 @@ static void print_usage(const char* appname)
     printf("    [-p=PATH]\n");
     printf("    [--path=PATH]         Path to search (default '/')\n");
     printf("    [--ignoredir=NAME]    Directories to ignore in searched path\n");
+    printf("    [-s|--short-stat]     Quick overview: show limits and totals only\n");
     printf("    [--sort-by-instances] Sort list by instances instead of watches\n");
     printf("    [-v|--verbose]        More option increase verbosity level\n");
     printf("    [--no-color]          Do not colorize output\n");
@@ -1063,6 +1065,7 @@ static void parse_cmdline(int argc, char** argv, std::vector<std::string>& cmdli
         { "threads", required_argument, 0, 0 },
         { "ignoredir", required_argument, 0, 0 },
         { "path", required_argument, 0, 0 },
+        { "short-stat", no_argument, 0, 0 },
         { "sort-by-instances", no_argument, 0, 0 },
         { "version", no_argument, 0, 0 },
         { "help", no_argument, 0, 0 },
@@ -1074,7 +1077,7 @@ static void parse_cmdline(int argc, char** argv, std::vector<std::string>& cmdli
 
     int c;
     int opt_ind = 0;
-    while ((c = getopt_long(argc, argv, "p:?hv", long_opts, &opt_ind)) != -1) {
+    while ((c = getopt_long(argc, argv, "p:?hvs", long_opts, &opt_ind)) != -1) {
         switch (c) {
         case 0:
             if (!strcasecmp("help", long_opts[opt_ind].name)) {
@@ -1100,6 +1103,8 @@ static void parse_cmdline(int argc, char** argv, std::vector<std::string>& cmdli
                 }
             } else if (!strcasecmp("path", long_opts[opt_ind].name)) {
                 g_search_path = optarg;
+            } else if (!strcasecmp("short-stat", long_opts[opt_ind].name)) {
+                g_short_stat = 1;
             } else if (!strcasecmp("sort-by-instances", long_opts[opt_ind].name)) {
                 g_sort_by_instances = 1;
             }
@@ -1109,6 +1114,9 @@ static void parse_cmdline(int argc, char** argv, std::vector<std::string>& cmdli
             break;
         case 'v':
             g_verbose++;
+            break;
+        case 's':
+            g_short_stat = 1;
             break;
         case 'h':
         case '?':
@@ -1170,9 +1178,11 @@ int main(int argc, char* argv[])
             total_instances += procinfo.instances;
         }
 
-        if (inotify_proclist.size()) {
-            print_inotify_proclist(inotify_proclist);
-            print_separator();
+        if (!g_short_stat) {
+            if (inotify_proclist.size()) {
+                print_inotify_proclist(inotify_proclist);
+                print_separator();
+            }
         }
 
         if (g_kernel_provides_watches_info)
@@ -1180,21 +1190,23 @@ int main(int argc, char* argv[])
         printf("Total inotify Instances: %s%u%s\n", BGREEN, total_instances, RESET);
         print_separator();
 
-        double search_time = gettime();
-        uint32_t total_scanned_dirs = find_files_in_inode_set(inotify_proclist, all_found_files);
-        if (total_scanned_dirs) {
-            search_time = gettime() - search_time;
+        if (!g_short_stat) {
+            double search_time = gettime();
+            uint32_t total_scanned_dirs = find_files_in_inode_set(inotify_proclist, all_found_files);
+            if (total_scanned_dirs) {
+                search_time = gettime() - search_time;
 
-            for (const filename_info_t& fname_info : all_found_files) {
-                printf("%s%9lu%s [%u:%u] %s\n", BGREEN, fname_info.inode, RESET,
-                    major(fname_info.dev), minor(fname_info.dev),
-                    fname_info.filename.c_str());
+                for (const filename_info_t& fname_info : all_found_files) {
+                    printf("%s%9lu%s [%u:%u] %s\n", BGREEN, fname_info.inode, RESET,
+                        major(fname_info.dev), minor(fname_info.dev),
+                        fname_info.filename.c_str());
+                }
+
+                setlocale(LC_NUMERIC, "");
+                GCC_DIAG_PUSH_OFF(format)
+                printf("\n%'u dirs scanned (%.2f seconds)\n", total_scanned_dirs, search_time);
+                GCC_DIAG_POP()
             }
-
-            setlocale(LC_NUMERIC, "");
-            GCC_DIAG_PUSH_OFF(format)
-            printf("\n%'u dirs scanned (%.2f seconds)\n", total_scanned_dirs, search_time);
-            GCC_DIAG_POP()
         }
     }
 
