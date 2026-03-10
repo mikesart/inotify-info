@@ -36,20 +36,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: {fetch-depth: 0}
-      - uses: actions/cache@v4
+      - uses: mlugg/setup-zig@v2
         with:
-          key: zig-sdk-and-cache-${{ hashFiles('.github/workflows/ci.yaml') }}
-          path: ~/.cache/zig
-      - run: |
-          wget --progress=dot:mega \
-            https://ziglang.org/download/0.13.0/zig-linux-$(uname -m)-0.13.0.tar.xz
-          tar -xJf zig-linux-*.tar.xz
-          rm zig-linux-*.xz
-          mv zig-linux-* zig-sdk
+          version: 0.15.1
       - run: |
           make VERBOSE=1 -j$(nproc) \
-            CC="zig-sdk/zig cc -target $(uname -m)-linux-musl" \
-            CXX="zig-sdk/zig c++ -target $(uname -m)-linux-musl"
+            CC="zig cc -target $(uname -m)-linux-musl" \
+            CXX="zig c++ -target $(uname -m)-linux-musl"
       - run: |
           _release/inotify-info --version
           _release/inotify-info
